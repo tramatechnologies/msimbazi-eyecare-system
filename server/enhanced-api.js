@@ -32,6 +32,21 @@ import {
   getValidationRules,
   validateWithRules,
 } from './validation.js';
+import {
+  securityHeaders,
+  apiRateLimiter,
+  authRateLimiter,
+  writeRateLimiter,
+  ipBlockingMiddleware,
+  validateRequestSize,
+  validateContentType,
+  checkAndBlockIP,
+  logSecurityEvent,
+  detectSuspiciousActivity,
+  csrfProtection,
+  generateCSRFToken,
+  storeCSRFToken,
+} from './security.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -42,13 +57,33 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// Middleware
+// ==================== ENTERPRISE SECURITY MIDDLEWARE ====================
+
+// Security headers (Helmet)
+app.use(securityHeaders);
+
+// IP blocking check
+app.use(ipBlockingMiddleware);
+
+// Request size validation
+app.use(validateRequestSize);
+
+// Content type validation
+app.use(validateContentType);
+
+// CORS configuration
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   credentials: true,
+  optionsSuccessStatus: 200,
 }));
+
+// Body parsing with limits
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+// General API rate limiting
+app.use(apiRateLimiter);
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -122,10 +157,10 @@ app.get('/health', (req, res) => {
  * POST /api/auth/login
  * User login with email and password
  */
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authRateLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
-    const ipAddress = req.ip;
+    const ipAddress = req.ip || req.connection.remoteAddress;
     const userAgent = req.headers['user-agent'];
 
     // Validate input
@@ -133,9 +168,25 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    // Check if IP is blocked
+    const ipBlockCheck = await checkAndBlockIP(ipAddress);
+    if (ipBlockCheck.shouldBlock) {
+      await logSecurityEvent('BLOCKED_IP_LOGIN_ATTEMPT', {
+        ip: ipAddress,
+        email: email.toLowerCase(),
+      });
+      return res.status(403).json({
+        error: 'Access denied. Your IP address has been temporarily blocked due to suspicious activity.',
+      });
+    }
+
     // Check login attempts
     const rateCheck = await checkLoginAttempts(email, ipAddress);
     if (!rateCheck.allowed) {
+      await logSecurityEvent('LOGIN_RATE_LIMIT_EXCEEDED', {
+        email: email.toLowerCase(),
+        ip: ipAddress,
+      });
       return res.status(429).json({
         error: rateCheck.message,
         retryAfter: rateCheck.lockedUntil,
@@ -148,12 +199,30 @@ app.post('/api/auth/login', async (req, res) => {
     if (!validation.valid) {
       // Record failed attempt
       await recordLoginAttempt(email, ipAddress, userAgent, false);
+      
+      // Log security event
+      await logSecurityEvent('FAILED_LOGIN_ATTEMPT', {
+        email: email.toLowerCase(),
+        ip: ipAddress,
+        reason: validation.error,
+      });
 
       return res.status(401).json({ error: validation.error });
     }
 
     // Record successful attempt
     await recordLoginAttempt(email, ipAddress, userAgent, true);
+    
+    // Check for suspicious activity
+    const suspiciousCheck = await detectSuspiciousActivity(validation.user.id, ipAddress, 'LOGIN');
+    if (suspiciousCheck.suspicious) {
+      await logSecurityEvent('SUSPICIOUS_LOGIN', {
+        userId: validation.user.id,
+        email: email.toLowerCase(),
+        ip: ipAddress,
+        reason: suspiciousCheck.reason,
+      });
+    }
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokens(
@@ -177,6 +246,10 @@ app.post('/api/auth/login', async (req, res) => {
     // Log authentication action
     await logAuthAction(validation.user.id, 'LOGIN', ipAddress);
 
+    // Generate and store CSRF token
+    const csrfToken = generateCSRFToken();
+    await storeCSRFToken(validation.user.id, csrfToken);
+
     // Update last login timestamp
     await supabase
       .from('profiles')
@@ -187,6 +260,7 @@ app.post('/api/auth/login', async (req, res) => {
       success: true,
       accessToken,
       refreshToken,
+      csrfToken, // Include CSRF token in response
       user: {
         id: validation.user.id,
         email: validation.user.email,
@@ -319,7 +393,7 @@ app.post('/api/auth/verify-role', authMiddleware, async (req, res) => {
  * POST /api/patients
  * Create a new patient with validation
  */
-app.post('/api/patients', authMiddleware, roleMiddleware(['receptionist', 'super_admin', 'clinic_manager']), async (req, res) => {
+app.post('/api/patients', authMiddleware, writeRateLimiter, csrfProtection, roleMiddleware(['receptionist', 'super_admin', 'clinic_manager']), async (req, res) => {
   try {
     const patientData = {
       name: sanitizeString(req.body.name),
@@ -482,7 +556,7 @@ const PATIENT_UPDATE_ROLES = ['receptionist', 'super_admin', 'clinic_manager', '
  * PUT /api/patients/:id
  * Update patient (demographics and/or EMR). Supports partial updates.
  */
-app.put('/api/patients/:id', authMiddleware, roleMiddleware(PATIENT_UPDATE_ROLES), async (req, res) => {
+app.put('/api/patients/:id', authMiddleware, writeRateLimiter, csrfProtection, roleMiddleware(PATIENT_UPDATE_ROLES), async (req, res) => {
   try {
     const patientId = req.params.id;
 
@@ -938,12 +1012,24 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint not found' });
 });
 
+// Import security configuration validator
+import { printSecurityStatus } from './security-config.js';
+
+// Validate security configuration on startup
+const securityStatus = printSecurityStatus();
+if (!securityStatus.isValid) {
+  console.error('\n❌ Security configuration validation failed. Please fix errors before starting server.\n');
+  process.exit(1);
+}
+
 // Start server
 app.listen(PORT, () => {
   console.log(`✅ Enhanced API server running on port ${PORT}`);
   console.log(`📊 Authentication enabled with JWT tokens`);
   console.log(`🔐 Role-based access control active`);
   console.log(`✔️  Input validation enabled`);
+  console.log(`🛡️  Enterprise security features active`);
+  console.log(`\n🚀 Server ready to accept connections\n`);
 });
 
 export default app;

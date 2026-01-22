@@ -99,6 +99,7 @@ CREATE INDEX IF NOT EXISTS idx_bill_items_category ON bill_items(category);
 -- =============================================================================
 -- 4. Appointments table (optional; can also store as JSONB on patients)
 -- =============================================================================
+-- Create table if it doesn't exist
 CREATE TABLE IF NOT EXISTS appointments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   patient_id UUID NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
@@ -113,8 +114,87 @@ CREATE TABLE IF NOT EXISTS appointments (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments(patient_id);
-CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(appointment_date);
+-- Add missing columns if table exists but columns are missing
+DO $$
+BEGIN
+  -- Add appointment_date if missing
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'appointment_date'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN appointment_date DATE;
+  END IF;
+
+  -- Add appointment_time if missing
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'appointment_time'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN appointment_time TIME;
+  END IF;
+
+  -- Add appointment_type if missing
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'appointment_type'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN appointment_type VARCHAR(100);
+  END IF;
+
+  -- Add other columns if missing
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'priority'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN priority VARCHAR(50) DEFAULT 'Normal';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'assigned_doctor_id'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN assigned_doctor_id UUID REFERENCES auth.users(id);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'assigned_department'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN assigned_department VARCHAR(100);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'status'
+  ) THEN
+    ALTER TABLE appointments ADD COLUMN status VARCHAR(50) NOT NULL DEFAULT 'SCHEDULED';
+  END IF;
+END $$;
+
+-- Create indexes only if the table and columns exist
+DO $$
+BEGIN
+  -- Check if appointments table exists and has the required columns
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_name = 'appointments'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'patient_id'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_appointments_patient_id ON appointments(patient_id);
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_name = 'appointments'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_name = 'appointments' AND column_name = 'appointment_date'
+  ) THEN
+    CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(appointment_date);
+  END IF;
+END $$;
 
 -- =============================================================================
 -- 5. Soft delete support on patients (optional)

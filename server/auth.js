@@ -7,6 +7,7 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { validatePasswordPolicy, checkPasswordHistory } from './security.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,

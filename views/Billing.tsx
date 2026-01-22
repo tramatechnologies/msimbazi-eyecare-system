@@ -1,30 +1,56 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PatientStatus, InsuranceType } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import { calculateBillTotal, calculateInsuranceCoverage, isInsuranceEligible } from '../utils/patientUtils';
-import { formatISODate, getCurrentDate } from '../utils/dateTimeUtils';
+import { formatDate, getCurrentDate } from '../utils/dateTimeUtils';
 
 const Billing: React.FC = () => {
-  const { patients, updatePatient } = usePatients();
+  const { patients, updatePatient, refreshPatient } = usePatients();
   const { success: showSuccess, error: showError } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
   
   const billingQueue = patients.filter(p => p.status === PatientStatus.PENDING_BILLING);
   const activePatient = patients.find(p => p.id === selectedId);
+
+  // Refresh patient data when selected
+  useEffect(() => {
+    if (selectedId) {
+      refreshPatient(selectedId).catch(err => {
+        console.error('Failed to refresh patient:', err);
+      });
+    }
+  }, [selectedId, refreshPatient]);
 
   const handleProcessPayment = async () => {
     if (!selectedId || !activePatient) {
       showError('Please select a patient');
       return;
     }
-    const result = await updatePatient(selectedId, { status: PatientStatus.COMPLETED });
-    if (result.success) {
-      showSuccess(`Payment Processed Successfully for ${activePatient.name}`);
-      setSelectedId(null);
-    } else {
-      showError(result.error ?? 'Failed to process payment');
+
+    if (activePatient.billItems.length === 0) {
+      showError('No bill items to process');
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const result = await updatePatient(selectedId, { status: PatientStatus.COMPLETED });
+      if (result.success) {
+        showSuccess(`Payment Processed Successfully for ${activePatient.name}`);
+        // Refresh patient data to get updated status
+        await refreshPatient(selectedId);
+        setSelectedId(null);
+      } else {
+        showError(result.error ?? 'Failed to process payment');
+      }
+    } catch (error) {
+      showError('An error occurred while processing payment');
+      console.error('Payment processing error:', error);
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -98,80 +124,100 @@ const Billing: React.FC = () => {
             </div>
 
             <div className="flex-1 p-8 overflow-y-auto custom-scrollbar">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="text-left pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Itemized Service</th>
-                    <th className="text-center pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Dept</th>
-                    <th className="text-center pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Eligibility</th>
-                    <th className="text-right pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Amount (TZS)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {activePatient.billItems.map(item => {
-                    const isEligible = isInsuranceEligible(item, activePatient.insuranceType);
-                    return (
-                      <tr key={item.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="py-4 text-sm font-semibold text-slate-800">{item.description}</td>
-                        <td className="py-4 text-center">
-                          <span className="text-xs px-3 py-1 bg-slate-100 rounded-lg font-semibold text-slate-600 uppercase tracking-wide">{item.category}</span>
-                        </td>
-                        <td className="py-4 text-center">
-                          {isEligible ? (
-                            <span className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full font-semibold flex items-center justify-center w-fit mx-auto gap-1.5">
-                              <i className="fas fa-shield-check text-xs"></i> Covered
-                            </span>
-                          ) : (
-                            <span className="text-xs px-3 py-1 bg-slate-100 text-slate-500 rounded-full font-semibold">Out-of-Pocket</span>
-                          )}
-                        </td>
-                        <td className="py-4 text-right font-bold text-slate-900 text-sm">{item.amount.toLocaleString()}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              {activePatient.billItems && activePatient.billItems.length > 0 ? (
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-200">
+                      <th className="text-left pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Itemized Service</th>
+                      <th className="text-center pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Dept</th>
+                      <th className="text-center pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Eligibility</th>
+                      <th className="text-right pb-4 text-xs font-semibold text-slate-600 uppercase tracking-wide">Amount (TZS)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activePatient.billItems.map(item => {
+                      const isEligible = isInsuranceEligible(item, activePatient.insuranceType);
+                      return (
+                        <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                          <td className="py-4 text-sm font-semibold text-slate-800">{item.description}</td>
+                          <td className="py-4 text-center">
+                            <span className="text-xs px-3 py-1 bg-slate-100 rounded-lg font-semibold text-slate-600 uppercase tracking-wide">{item.category}</span>
+                          </td>
+                          <td className="py-4 text-center">
+                            {isEligible ? (
+                              <span className="text-xs px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full font-semibold flex items-center justify-center w-fit mx-auto gap-1.5">
+                                <i className="fas fa-shield-check text-xs"></i> Covered
+                              </span>
+                            ) : (
+                              <span className="text-xs px-3 py-1 bg-slate-100 text-slate-500 rounded-full font-semibold">Out-of-Pocket</span>
+                            )}
+                          </td>
+                          <td className="py-4 text-right font-bold text-slate-900 text-sm">{item.amount.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-20 text-center">
+                  <i className="fas fa-receipt text-5xl text-slate-200 mb-4"></i>
+                  <p className="text-sm font-semibold text-slate-600 mb-2">No bill items found</p>
+                  <p className="text-xs text-slate-400">This patient has no services or items to bill.</p>
+                </div>
+              )}
             </div>
 
             <div className="p-8 bg-slate-950 text-white space-y-6">
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm font-semibold text-slate-400">
-                  <span>Gross Total Services</span>
-                  <span>TZS {calculateBillTotal(activePatient.billItems).toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm font-semibold text-brand-primary-light">
-                  <span>Insurance Contribution</span>
-                  <span>- TZS {calculateInsuranceCoverage(activePatient).toLocaleString()}</span>
-                </div>
-              </div>
+              {activePatient.billItems && activePatient.billItems.length > 0 ? (
+                <>
+                  <div className="space-y-3">
+                    <div className="flex justify-between text-sm font-semibold text-slate-400">
+                      <span>Gross Total Services</span>
+                      <span>TZS {calculateBillTotal(activePatient.billItems).toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-semibold text-brand-primary-light">
+                      <span>Insurance Contribution</span>
+                      <span>- TZS {calculateInsuranceCoverage(activePatient).toLocaleString()}</span>
+                    </div>
+                  </div>
 
-              <div className="border-t border-white/10 pt-6 flex justify-between items-center">
-                <div>
-                  <p className="text-xs font-semibold text-brand-primary-light uppercase tracking-wide mb-2">Net Patient Responsibility</p>
-                  <span className="text-base font-bold tracking-tight">TZS {(calculateBillTotal(activePatient.billItems) - calculateInsuranceCoverage(activePatient)).toLocaleString()}</span>
-                </div>
-                
-                <div className="flex gap-3">
+                  <div className="border-t border-white/10 pt-6 flex justify-between items-center">
+                    <div>
+                      <p className="text-xs font-semibold text-brand-primary-light uppercase tracking-wide mb-2">Net Patient Responsibility</p>
+                      <span className="text-base font-bold tracking-tight">TZS {(calculateBillTotal(activePatient.billItems) - calculateInsuranceCoverage(activePatient)).toLocaleString()}</span>
+                    </div>
+                    
+                    <div className="flex gap-3">
                   <button className="px-6 h-12 bg-white/5 border border-white/10 rounded-xl font-semibold text-sm hover:bg-white/10 transition-all flex items-center gap-2">
                     <i className="fas fa-print"></i> Print
                   </button>
                   <button 
                     onClick={handleProcessPayment}
-                    className="px-8 h-12 text-white rounded-xl font-semibold text-sm shadow-lg active:scale-95 transition-all"
+                    disabled={isProcessing || !activePatient.billItems || activePatient.billItems.length === 0}
+                    className="px-8 h-12 text-white rounded-xl font-semibold text-sm shadow-lg active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     style={{
                       backgroundColor: 'var(--brand-primary)',
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = 'var(--brand-primary-light)';
+                      if (!isProcessing && activePatient.billItems.length > 0) {
+                        e.currentTarget.style.backgroundColor = 'var(--brand-primary-light)';
+                      }
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
                     }}
                   >
-                    Confirm & Complete Checkout
+                    {isProcessing ? 'Processing...' : 'Confirm & Complete Checkout'}
                   </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center py-8">
+                  <p className="text-sm font-semibold text-slate-400 mb-2">No charges to process</p>
+                  <p className="text-xs text-slate-500">Add services or items before processing payment.</p>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         ) : (

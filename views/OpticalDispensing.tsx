@@ -4,6 +4,7 @@ import { PatientStatus, PrescriptionHistoryEvent, InsuranceType } from '../types
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import { generateBillItemId } from '../utils/idGenerator';
+import { createBillItem, createPrescription } from '../services/patientService';
 
 const LENS_TYPES = [
   { name: 'Single Vision - Distance', basePrice: 20000, nhifEligible: true, nhifCap: 20000 },
@@ -35,7 +36,7 @@ const NHIF_REGS = {
 };
 
 const OpticalDispensing: React.FC = () => {
-  const { patients, updatePatient } = usePatients();
+  const { patients, updatePatient, refreshPatient, useApi } = usePatients();
   const { success: showSuccess, error: showError } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [lensType, setLensType] = useState(LENS_TYPES[0].name);
@@ -49,6 +50,7 @@ const OpticalDispensing: React.FC = () => {
   const [addOd, setAddOd] = useState('');
   const [addOs, setAddOs] = useState('');
   const [showHistory, setShowHistory] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [isCalculatorOpen, setIsCalculatorOpen] = useState(false);
   const [useCase, setUseCase] = useState('Daily Use');
@@ -61,9 +63,22 @@ const OpticalDispensing: React.FC = () => {
   const activePatient = patients.find(p => p.id === selectedId);
   const opticalQueue = patients.filter(p => p.status === PatientStatus.PENDING_BILLING || p.status === PatientStatus.IN_OPTICAL || (p.prescription && p.status !== PatientStatus.COMPLETED));
 
+  // Refresh patient data when selected
+  useEffect(() => {
+    if (selectedId) {
+      refreshPatient(selectedId).catch(err => {
+        console.error('Failed to refresh patient:', err);
+      });
+    }
+  }, [selectedId, refreshPatient]);
+
   useEffect(() => {
     if (activePatient) {
-      setOd(activePatient.prescription?.od || ''); setOs(activePatient.prescription?.os || ''); setAddOd(activePatient.prescription?.addOd || activePatient.prescription?.add || ''); setAddOs(activePatient.prescription?.addOs || activePatient.prescription?.add || ''); setEdgeColor(activePatient.prescription?.edgeColor || LENS_EDGE_COLORS[0].name);
+      setOd(activePatient.prescription?.od || ''); 
+      setOs(activePatient.prescription?.os || ''); 
+      setAddOd(activePatient.prescription?.addOd || activePatient.prescription?.add || ''); 
+      setAddOs(activePatient.prescription?.addOs || activePatient.prescription?.add || ''); 
+      setEdgeColor(activePatient.prescription?.edgeColor || LENS_EDGE_COLORS[0].name);
     }
   }, [activePatient]);
 
@@ -92,41 +107,113 @@ const OpticalDispensing: React.FC = () => {
       showError('Please select a patient');
       return;
     }
-    
-    // Check if patient needs medications by checking consultation notes/plan
-    const consultationNotes = activePatient.consultationNotes || '';
-    const clinicalNotes = activePatient.clinicalNotes || '';
-    const combinedNotes = (consultationNotes + ' ' + clinicalNotes).toLowerCase();
-    
-    const needsMedications = combinedNotes.includes('medication') || 
-                            combinedNotes.includes('drops') || 
-                            combinedNotes.includes('eye drops') ||
-                            combinedNotes.includes('prescribe') ||
-                            combinedNotes.includes('prescription') ||
-                            combinedNotes.includes('ointment') ||
-                            combinedNotes.includes('tablet') ||
-                            combinedNotes.includes('pharmacy');
 
-    // Route to Pharmacy if medications needed, otherwise to Billing
-    const nextStatus = needsMedications ? PatientStatus.IN_PHARMACY : PatientStatus.PENDING_BILLING;
-    const successMessage = needsMedications 
-      ? 'Optical order submitted. Patient routed to Pharmacy for medications.'
-      : 'Optical order submitted for billing';
-    
-    const result = await updatePatient(activePatient.id, {
-      status: nextStatus,
-      prescription: { ...activePatient.prescription, od, os, addOd, addOs, edgeColor },
-      billItems: [
-        ...activePatient.billItems,
-        { id: generateBillItemId(), description: `Frame: ${frameDetails}`, amount: framePrice, category: 'OPTICAL', isCoveredByNHIF: claimFrameNHIF, isCoveredByPrivate: true },
-        { id: generateBillItemId(), description: `Lens Engineering: ${lensType}`, amount: pricingSummary.subtotalLens, category: 'OPTICAL', isCoveredByNHIF: claimLensNHIF, isCoveredByPrivate: true }
-      ]
-    });
-    if (result.success) {
-      showSuccess(successMessage);
-      setSelectedId(null);
-    } else {
-      showError(result.error ?? 'Failed to submit order');
+    if (!frameDetails.trim() && framePrice === 0 && pricingSummary.subtotalLens === 0) {
+      showError('Please add frame details or lens configuration');
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Check if patient needs medications by checking consultation notes/plan
+      const consultationNotes = activePatient.consultationNotes || '';
+      const clinicalNotes = activePatient.clinicalNotes || '';
+      const combinedNotes = (consultationNotes + ' ' + clinicalNotes).toLowerCase();
+      
+      const needsMedications = combinedNotes.includes('medication') || 
+                              combinedNotes.includes('drops') || 
+                              combinedNotes.includes('eye drops') ||
+                              combinedNotes.includes('prescribe') ||
+                              combinedNotes.includes('prescription') ||
+                              combinedNotes.includes('ointment') ||
+                              combinedNotes.includes('tablet') ||
+                              combinedNotes.includes('pharmacy');
+
+      // Route to Pharmacy if medications needed, otherwise to Billing
+      const nextStatus = needsMedications ? PatientStatus.IN_PHARMACY : PatientStatus.PENDING_BILLING;
+      const successMessage = needsMedications 
+        ? 'Optical order submitted. Patient routed to Pharmacy for medications.'
+        : 'Optical order submitted for billing';
+
+      // Prepare prescription update
+      const prescriptionUpdate = {
+        ...activePatient.prescription,
+        od,
+        os,
+        addOd,
+        addOs,
+        edgeColor
+      };
+
+      // Prepare bill items
+      const newBillItems = [];
+      if (frameDetails.trim() || framePrice > 0) {
+        newBillItems.push({
+          id: generateBillItemId(),
+          description: frameDetails.trim() ? `Frame: ${frameDetails}` : 'Frame',
+          amount: framePrice,
+          category: 'OPTICAL' as const,
+          isCoveredByNHIF: claimFrameNHIF,
+          isCoveredByPrivate: true
+        });
+      }
+      if (pricingSummary.subtotalLens > 0) {
+        newBillItems.push({
+          id: generateBillItemId(),
+          description: `Lens Engineering: ${lensType} (${lensIndex})`,
+          amount: pricingSummary.subtotalLens,
+          category: 'OPTICAL' as const,
+          isCoveredByNHIF: claimLensNHIF,
+          isCoveredByPrivate: true
+        });
+      }
+
+      // Create prescription via API if available
+      if (useApi && (od || os || addOd || addOs)) {
+        try {
+          await createPrescription(activePatient.id, prescriptionUpdate);
+        } catch (apiError) {
+          console.warn('Failed to create prescription via API, will update via patient update:', apiError);
+        }
+      }
+
+      // Create bill items via API if available
+      if (useApi && newBillItems.length > 0) {
+        try {
+          for (const item of newBillItems) {
+            await createBillItem(activePatient.id, item);
+          }
+        } catch (apiError) {
+          console.warn('Failed to create bill items via API, falling back to update:', apiError);
+        }
+      }
+
+      // Update patient with prescription and bill items
+      const result = await updatePatient(activePatient.id, {
+        status: nextStatus,
+        prescription: prescriptionUpdate,
+        billItems: [...(activePatient.billItems || []), ...newBillItems]
+      });
+
+      if (result.success) {
+        // Refresh patient data to get updated information
+        await refreshPatient(activePatient.id);
+        showSuccess(successMessage);
+        setSelectedId(null);
+        // Reset form
+        setFrameDetails('');
+        setFramePrice(0);
+        setSelectedCoatings([]);
+        setClaimFrameNHIF(false);
+        setClaimLensNHIF(false);
+      } else {
+        showError(result.error ?? 'Failed to submit order');
+      }
+    } catch (error) {
+      showError('An error occurred while processing the order');
+      console.error('Optical dispensing error:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -153,7 +240,13 @@ const OpticalDispensing: React.FC = () => {
           <div className="flex-1 bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
             <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20">
               <div> <h2 className="text-xl font-black text-slate-900 tracking-tight">{activePatient.name}</h2> <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{activePatient.insuranceType} Dispensing</span> </div>
-              <button onClick={handleCompleteDispensing} className="px-10 py-3 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-500 transition-all">Submit for Billing</button>
+              <button 
+                onClick={handleCompleteDispensing} 
+                disabled={isSubmitting}
+                className="px-10 py-3 bg-blue-600 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl hover:bg-blue-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isSubmitting ? 'Processing...' : 'Submit for Billing'}
+              </button>
             </div>
             <div className="flex-1 p-8 space-y-12 overflow-y-auto custom-scrollbar">
               <section className="space-y-6">

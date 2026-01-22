@@ -1,10 +1,11 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { PatientStatus, Medication, BillItem, InsuranceType } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import { generateBillItemId } from '../utils/idGenerator';
 import { isInsuranceEligible } from '../utils/patientUtils';
+import { createBillItem } from '../services/patientService';
 
 const MOCK_MEDICATIONS: Medication[] = [
   { id: 'm1', name: 'Atropine Sulfate 1%', dosage: '10ml', form: 'Drops', price: 15000, stock: 45, isCoveredByNHIF: true, isCoveredByPrivate: true },
@@ -16,14 +17,28 @@ const MOCK_MEDICATIONS: Medication[] = [
 ];
 
 const Pharmacy: React.FC = () => {
-  const { patients, updatePatient } = usePatients();
+  const { patients, updatePatient, refreshPatient, useApi } = usePatients();
   const { success: showSuccess, error: showError } = useToast();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [dispensingItems, setDispensingItems] = useState<{ med: Medication; qty: number }[]>([]);
+  const [isDispensing, setIsDispensing] = useState(false);
 
   const activePatient = patients.find(p => p.id === selectedId);
-  const pharmacyQueue = patients.filter(p => p.status === PatientStatus.PENDING_TREATMENT || p.status === PatientStatus.IN_PHARMACY || p.prescription?.medications);
+  const pharmacyQueue = patients.filter(p => 
+    p.status === PatientStatus.PENDING_TREATMENT || 
+    p.status === PatientStatus.IN_PHARMACY || 
+    (p.prescription?.medications && p.prescription.medications.length > 0)
+  );
+
+  // Refresh patient data when selected
+  useEffect(() => {
+    if (selectedId) {
+      refreshPatient(selectedId).catch(err => {
+        console.error('Failed to refresh patient:', err);
+      });
+    }
+  }, [selectedId, refreshPatient]);
 
   const filteredMeds = MOCK_MEDICATIONS.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -42,25 +57,49 @@ const Pharmacy: React.FC = () => {
       return;
     }
 
-    const newBillItems: BillItem[] = dispensingItems.map(item => ({
-      id: generateBillItemId(),
-      description: `Med: ${item.med.name} (${item.med.dosage}) x${item.qty}`,
-      amount: item.med.price * item.qty,
-      category: 'PHARMACY',
-      isCoveredByNHIF: item.med.isCoveredByNHIF,
-      isCoveredByPrivate: item.med.isCoveredByPrivate
-    }));
+    setIsDispensing(true);
+    try {
+      const newBillItems: BillItem[] = dispensingItems.map(item => ({
+        id: generateBillItemId(),
+        description: `${item.med.name} (${item.med.dosage}) x${item.qty}`,
+        amount: item.med.price * item.qty,
+        category: 'PHARMACY',
+        isCoveredByNHIF: item.med.isCoveredByNHIF,
+        isCoveredByPrivate: item.med.isCoveredByPrivate
+      }));
 
-    const result = await updatePatient(activePatient.id, {
-      status: PatientStatus.PENDING_BILLING,
-      billItems: [...activePatient.billItems, ...newBillItems]
-    });
-    if (result.success) {
-      showSuccess('Dispensing recorded for checkout');
-      setSelectedId(null);
-      setDispensingItems([]);
-    } else {
-      showError(result.error ?? 'Failed to record dispensing');
+      // Create bill items via API if available
+      if (useApi) {
+        try {
+          // Create bill items individually via API
+          for (const item of newBillItems) {
+            await createBillItem(activePatient.id, item);
+          }
+        } catch (apiError) {
+          console.warn('Failed to create bill items via API, falling back to update:', apiError);
+        }
+      }
+
+      // Update patient status and bill items
+      const result = await updatePatient(activePatient.id, {
+        status: PatientStatus.PENDING_BILLING,
+        billItems: [...(activePatient.billItems || []), ...newBillItems]
+      });
+
+      if (result.success) {
+        // Refresh patient data to get updated bill items
+        await refreshPatient(activePatient.id);
+        showSuccess(`Medications dispensed successfully. ${activePatient.name} routed to billing.`);
+        setSelectedId(null);
+        setDispensingItems([]);
+      } else {
+        showError(result.error ?? 'Failed to record dispensing');
+      }
+    } catch (error) {
+      showError('An error occurred while processing dispensing');
+      console.error('Dispensing error:', error);
+    } finally {
+      setIsDispensing(false);
     }
   };
 
@@ -70,7 +109,14 @@ const Pharmacy: React.FC = () => {
         <h3 className="font-black text-slate-800 text-[10px] uppercase tracking-widest flex items-center justify-between px-2">Pharma Board <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-[10px]">{pharmacyQueue.length}</span></h3>
         <div className="flex-1 overflow-y-auto space-y-3 px-2 custom-scrollbar">
           {pharmacyQueue.map(patient => (
-            <button key={patient.id} onClick={() => { setSelectedId(patient.id); setDispensingItems([]); }} className={`w-full p-5 rounded-[2rem] text-left border transition-all ${selectedId === patient.id ? 'bg-emerald-600 border-emerald-600 text-white shadow-xl' : 'bg-white border-slate-200 hover:border-emerald-300'}`}>
+            <button 
+              key={patient.id} 
+              onClick={() => { 
+                setSelectedId(patient.id); 
+                setDispensingItems([]); 
+              }} 
+              className={`w-full p-5 rounded-[2rem] text-left border transition-all ${selectedId === patient.id ? 'bg-emerald-600 border-emerald-600 text-white shadow-xl' : 'bg-white border-slate-200 hover:border-emerald-300'}`}
+            >
               <div className="flex justify-between items-start mb-2">
                 <span className="font-black truncate">{patient.name}</span>
                 <span className={`text-[8px] px-2 py-0.5 rounded-full font-black uppercase ${selectedId === patient.id ? 'bg-emerald-400' : 'bg-slate-100 text-slate-500'}`}>{patient.insuranceType}</span>
@@ -134,7 +180,13 @@ const Pharmacy: React.FC = () => {
               </div>
               <div className="space-y-4 pt-6 border-t border-white/10">
                 <div className="flex justify-between items-center"> <span className="text-sm font-black uppercase tracking-widest text-slate-400">Net Total</span> <span className="text-2xl font-black text-emerald-400"> TZS {dispensingItems.reduce((acc, curr) => acc + (curr.med.price * curr.qty), 0).toLocaleString()} </span> </div>
-                <button onClick={handleCompleteDispensing} disabled={dispensingItems.length === 0} className="w-full bg-emerald-500 text-white py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl hover:bg-emerald-400 transition-all disabled:opacity-30"> Dispatch for Billing </button>
+                <button 
+                  onClick={handleCompleteDispensing} 
+                  disabled={dispensingItems.length === 0 || isDispensing} 
+                  className="w-full bg-emerald-500 text-white py-4 rounded-2xl font-black text-[11px] uppercase tracking-widest shadow-xl hover:bg-emerald-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                > 
+                  {isDispensing ? 'Processing...' : 'Dispatch for Billing'} 
+                </button>
               </div>
             </div>
           </div>
