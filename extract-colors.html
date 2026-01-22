@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Color Extractor</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        #preview { max-width: 400px; margin: 20px 0; }
+        #colors { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+        .color-box { width: 100px; height: 100px; border: 2px solid #000; }
+        canvas { display: none; }
+    </style>
+</head>
+<body>
+    <h1>Logo Color Extractor</h1>
+    <input type="file" id="fileInput" accept="image/*">
+    <div id="preview"></div>
+    <div id="colors"></div>
+    
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const colorsDiv = document.getElementById('colors');
+        
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    preview.innerHTML = `<img src="${event.target.result}" style="max-width: 100%;">`;
+                    
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    ctx.drawImage(img, 0, 0);
+                    
+                    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                    const pixels = imageData.data;
+                    const colorMap = {};
+                    
+                    // Sample every 10th pixel for performance
+                    for (let i = 0; i < pixels.length; i += 40) {
+                        const r = pixels[i];
+                        const g = pixels[i + 1];
+                        const b = pixels[i + 2];
+                        const a = pixels[i + 3];
+                        
+                        if (a < 128) continue; // Skip transparent pixels
+                        
+                        // Round to nearest 10 for grouping
+                        const key = `${Math.round(r/10)*10},${Math.round(g/10)*10},${Math.round(b/10)*10}`;
+                        colorMap[key] = (colorMap[key] || 0) + 1;
+                    }
+                    
+                    // Get top colors
+                    const sorted = Object.entries(colorMap)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 10);
+                    
+                    colorsDiv.innerHTML = '<h3>Top Colors:</h3>';
+                    sorted.forEach(([rgb, count]) => {
+                        const [r, g, b] = rgb.split(',').map(Number);
+                        const hex = `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+                        const box = document.createElement('div');
+                        box.className = 'color-box';
+                        box.style.backgroundColor = hex;
+                        box.title = `RGB(${r},${g},${b}) - ${hex}`;
+                        colorsDiv.appendChild(box);
+                        console.log(`RGB(${r},${g},${b}) = ${hex}`);
+                    });
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>

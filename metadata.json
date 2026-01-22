@@ -1,0 +1,8 @@
+
+{
+  "name": "Msimbazi Eye Centre Management System",
+  "description": "A comprehensive end-to-end healthcare management platform for eye clinics, featuring patient registration, smart queue management, clinical EMR, optical dispensing, pharmacy integration, and unified NHIF billing.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

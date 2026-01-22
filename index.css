@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+/* Brand Colors - Green and White from logo */
+:root {
+  /* Primary Brand Colors - Green from logo */
+  --brand-primary: #10b981;        /* Main brand color - Green (Emerald-500) */
+  --brand-primary-dark: #059669;    /* Darker shade for hover states (Emerald-600) */
+  --brand-primary-light: #34d399;   /* Lighter shade for backgrounds (Emerald-400) */
+  --brand-primary-50: #ecfdf5;      /* Very light tint for backgrounds */
+  --brand-primary-100: #d1fae5;    /* Light tint */
+  
+  /* Secondary Brand Colors - Darker green for gradients and accents */
+  --brand-secondary: #059669;      /* Darker green for gradient (Emerald-600) */
+  --brand-secondary-dark: #047857;  /* Even darker green for hover (Emerald-700) */
+  --brand-secondary-light: #10b981; /* Medium green (Emerald-500) */
+  --brand-secondary-50: #ecfdf5;    /* Very light green */
+  --brand-secondary-100: #d1fae5;  /* Light green */
+  
+  /* Gradient Colors */
+  --brand-gradient-from: var(--brand-primary);
+  --brand-gradient-to: var(--brand-secondary);
+  
+  /* Semantic Colors (adjusted to match green branding) */
+  --brand-success: #10b981;         /* Same as primary */
+  --brand-danger: #ef4444;          /* Red for errors */
+  --brand-warning: #f59e0b;         /* Orange for warnings */
+  --brand-info: var(--brand-primary); /* Green for info */
+}
+
+/* Base Typography - Standardized font sizes: 12px, 14px, 16px only */
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: #f8fafc;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Headings - All use 16px */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.4;
+  color: #0f172a;
+}
+
+/* Form inputs - 14px base */
+input[type="text"],
+input[type="email"],
+input[type="tel"],
+input[type="date"],
+input[type="password"],
+input[type="number"],
+select,
+textarea {
+  min-height: 44px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* Text readability - 14px base */
+p {
+  font-size: 14px;
+  line-height: 1.5;
+  color: #475569;
+}
+
+/* Labels - 12px */
+label {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #334155;
+}
+
+/* Small text - 12px */
+small,
+.text-xs {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Custom scrollbar styles */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Brand gradient button - Green branding */
+.btn-brand-gradient {
+  background: linear-gradient(to right, var(--brand-primary), var(--brand-secondary));
+  transition: all 0.2s ease;
+}
+
+.btn-brand-gradient:hover:not(:disabled) {
+  background: linear-gradient(to right, var(--brand-primary-dark), var(--brand-secondary-dark));
+}
+
+.btn-brand-gradient:active:not(:disabled) {
+  transform: scale(0.95);
+  background: linear-gradient(to right, var(--brand-primary-dark), var(--brand-secondary-dark));
+}
