@@ -10,7 +10,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "assign-super-admin": "node scripts/assign-super-admin.js",
-    "update-user-name": "node scripts/update-user-name.js"
+    "update-user-name": "node scripts/update-user-name.js",
+    "db:migrate": "node scripts/run-migration.js"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",
@@ -32,6 +33,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.23",
     "concurrently": "^8.2.2",
+    "pg": "^8.17.2",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.8.2",

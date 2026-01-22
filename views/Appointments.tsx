@@ -174,9 +174,10 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
                 onClick={() => setViewMode('queue')}
                 className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === 'queue'
-                    ? 'bg-brand-primary text-white shadow-md'
+                    ? 'text-white shadow-md'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
+                style={viewMode === 'queue' ? { backgroundColor: 'var(--brand-primary)' } : {}}
               >
                 <i className="fas fa-list-ol mr-2"></i>
                 Queue ({clinicalQueue.length})
@@ -185,9 +186,10 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
                 onClick={() => setViewMode('appointments')}
                 className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
                   viewMode === 'appointments'
-                    ? 'bg-brand-primary text-white shadow-md'
+                    ? 'text-white shadow-md'
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
+                style={viewMode === 'appointments' ? { backgroundColor: 'var(--brand-primary)' } : {}}
               >
                 <i className="fas fa-calendar-check mr-2"></i>
                 Scheduled ({upcomingAppointments.length})
@@ -212,11 +214,14 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex items-start gap-4 flex-1">
-                        <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm ${
-                          patient.status === PatientStatus.IN_CLINICAL
-                            ? 'bg-brand-primary text-white'
-                            : 'bg-orange-100 text-orange-600'
-                        }`}>
+                        <div 
+                          className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm ${
+                            patient.status === PatientStatus.IN_CLINICAL
+                              ? 'text-white'
+                              : 'bg-orange-100 text-orange-600'
+                          }`}
+                          style={patient.status === PatientStatus.IN_CLINICAL ? { backgroundColor: 'var(--brand-primary)' } : {}}
+                        >
                           {patient.name.charAt(0)}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -270,7 +275,16 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
                       </div>
                       <button
                         onClick={() => handleStartAttending(patient.id)}
-                        className="px-6 py-2.5 bg-brand-primary text-white rounded-xl text-xs font-semibold hover:bg-brand-primary-dark transition-colors flex items-center gap-2 whitespace-nowrap"
+                        className="px-6 py-2.5 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 whitespace-nowrap"
+                        style={{
+                          backgroundColor: 'var(--brand-primary)',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                        }}
                       >
                         <i className="fas fa-file-medical"></i>
                         Open EMR
@@ -348,7 +362,16 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
                           </div>
                           <button
                             onClick={() => handleStartAttending(appointment.patientId)}
-                            className="px-6 py-2.5 bg-brand-primary text-white rounded-xl text-xs font-semibold hover:bg-brand-primary-dark transition-colors flex items-center gap-2 whitespace-nowrap"
+                            className="px-6 py-2.5 text-white rounded-xl text-xs font-semibold transition-colors flex items-center gap-2 whitespace-nowrap"
+                            style={{
+                              backgroundColor: 'var(--brand-primary)',
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                            }}
                           >
                             <i className="fas fa-file-medical"></i>
                             Open EMR

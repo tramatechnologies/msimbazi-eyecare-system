@@ -122,16 +122,27 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
       {/* Mobile Backdrop */}
       {isMobile && isSidebarOpen && (
         <div 
-          className="fixed inset-0 bg-slate-900/50 z-40 transition-opacity duration-300 opacity-100"
+          className="fixed inset-0 z-40 transition-opacity duration-300 opacity-100"
+          style={{
+            backgroundColor: 'rgba(4, 120, 87, 0.5)', // Dark green backdrop (Emerald-700 with opacity)
+          }}
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside 
-        className={`fixed lg:relative z-50 h-full bg-slate-900 text-white flex-shrink-0 flex flex-col transition-all duration-300 ease-in-out ${sidebarWidth} ${sidebarTranslate}`}
+        className={`fixed lg:relative z-50 h-full text-white flex-shrink-0 flex flex-col transition-all duration-300 ease-in-out ${sidebarWidth} ${sidebarTranslate}`}
+        style={{
+          backgroundColor: '#047857', // Dark green (Emerald-700) - darker than brand-secondary-dark
+        }}
       >
-        <div className={`p-6 border-b border-slate-800 transition-all duration-300 ease-in-out ${isSidebarOpen ? 'flex flex-col items-center gap-3' : 'flex items-center justify-center'}`}>
+        <div 
+          className={`p-6 border-b transition-all duration-300 ease-in-out ${isSidebarOpen ? 'flex flex-col items-center gap-3' : 'flex items-center justify-center'}`}
+          style={{
+            borderColor: '#065f46', // Even darker green for border (Emerald-800)
+          }}
+        >
           <div className="bg-white p-2 rounded-xl flex-shrink-0 shadow-md overflow-hidden">
             <img 
               src="/src/assets/Msimbazi Logo.jpg" 
@@ -170,9 +181,28 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
                 isSidebarOpen ? 'px-4 py-3.5 gap-3' : 'p-3 justify-center'
               } ${
                 currentPage === item.id 
-                  ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20 font-semibold' 
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+                  ? 'text-white shadow-lg font-semibold' 
+                  : 'text-slate-300 hover:text-white'
               }`}
+              style={currentPage === item.id 
+                ? {
+                    backgroundColor: 'var(--brand-primary)',
+                    boxShadow: '0 10px 15px -3px rgba(16, 185, 129, 0.2), 0 4px 6px -2px rgba(16, 185, 129, 0.1)',
+                  }
+                : {
+                    backgroundColor: 'transparent',
+                  }
+              }
+              onMouseEnter={(e) => {
+                if (currentPage !== item.id) {
+                  e.currentTarget.style.backgroundColor = '#065f46'; // Dark green hover (Emerald-800)
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentPage !== item.id) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }
+              }}
             >
               <i className={`fas ${item.icon} text-base w-6 flex-shrink-0 text-center`}></i>
               {isSidebarOpen && (

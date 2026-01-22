@@ -306,7 +306,7 @@ const ICD10_COMMON_EYE_CODES = [
 ];
 
 const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
-  const { patients, updatePatient } = usePatients();
+  const { patients, updatePatient, refreshPatient, useApi } = usePatients();
   const { success: showSuccess, error: showError } = useToast();
   
   // Check if patient ID was passed from appointments page
@@ -413,6 +413,13 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
   }>({});
 
   const activePatient = patients.find(p => p.id === selectedPatientId);
+
+  // When using API, fetch full patient details (incl. prescription, billItems) on select
+  useEffect(() => {
+    if (useApi && selectedPatientId) {
+      refreshPatient(selectedPatientId).catch(() => {});
+    }
+  }, [useApi, selectedPatientId, refreshPatient]);
 
   // Load patient data when selectedPatientId changes
   useEffect(() => {
@@ -1832,7 +1839,16 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
         <div className="flex gap-4">
           <button 
             onClick={handleComplete} 
-            className="px-10 py-3.5 bg-brand-primary text-white font-semibold uppercase tracking-wide text-sm rounded-xl shadow-xl hover:bg-blue-500 active:scale-95 transition-all"
+            className="px-10 py-3.5 text-white font-semibold uppercase tracking-wide text-sm rounded-xl shadow-xl active:scale-95 transition-all"
+            style={{
+              backgroundColor: 'var(--brand-primary)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#3b82f6';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+            }}
           >
             Complete Clinical Session
           </button>

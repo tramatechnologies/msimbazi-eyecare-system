@@ -122,6 +122,84 @@ export const validatePatient = async (patientData) => {
 };
 
 /**
+ * Validate patient partial update (EMR, status, etc.).
+ * Only validates fields that are present; no required fields.
+ */
+export const validatePatientPartial = async (patientData, options = {}) => {
+  const { excludePatientId = null } = options;
+  const errors = {};
+
+  if (patientData.name !== undefined) {
+    if (!patientData.name || patientData.name.trim().length === 0) {
+      errors.name = 'Name cannot be empty';
+    } else if (patientData.name.length < 2 || patientData.name.length > 255) {
+      errors.name = 'Name must be between 2 and 255 characters';
+    } else if (!VALIDATION_PATTERNS.name.test(patientData.name)) {
+      errors.name = 'Name contains invalid characters';
+    }
+  }
+
+  if (patientData.phone !== undefined) {
+    if (!patientData.phone || String(patientData.phone).trim().length === 0) {
+      errors.phone = 'Phone cannot be empty';
+    } else {
+      const p = String(patientData.phone).replace(/\D/g, '');
+      const norm = p.length === 9 && p.startsWith('7') ? '0' + p : p;
+      if (!VALIDATION_PATTERNS.phone.test(norm)) {
+        errors.phone = 'Phone must be 10 digits starting with 07 (07XXXXXXXX)';
+      }
+    }
+    if (!errors.phone && excludePatientId) {
+      const { data: existing, error } = await supabase
+        .from('patients')
+        .select('id')
+        .eq('phone', patientData.phone)
+        .neq('id', excludePatientId);
+      if (error) errors.phone = 'Database error checking phone uniqueness';
+      else if (existing && existing.length > 0) errors.phone = 'A patient with this phone number already exists';
+    }
+  }
+
+  if (patientData.email !== undefined && patientData.email && patientData.email.trim().length > 0) {
+    if (!VALIDATION_PATTERNS.email.test(patientData.email)) errors.email = 'Invalid email format';
+  }
+
+  if (patientData.dob !== undefined && patientData.dob) {
+    const dob = new Date(patientData.dob);
+    const now = new Date();
+    const age = now.getFullYear() - dob.getFullYear();
+    if (isNaN(dob.getTime())) errors.dob = 'Invalid date of birth format';
+    else if (dob > now) errors.dob = 'Date of birth cannot be in the future';
+    else if (age > 150) errors.dob = 'Age cannot exceed 150 years';
+  }
+
+  if (patientData.gender !== undefined && patientData.gender && !['Male', 'Female', 'Other'].includes(patientData.gender)) {
+    errors.gender = 'Invalid gender value';
+  }
+
+  if (patientData.insuranceType !== undefined && patientData.insuranceType && !['NHIF', 'PRIVATE', 'CASH'].includes(patientData.insuranceType)) {
+    errors.insuranceType = 'Invalid insurance type';
+  }
+
+  if (patientData.address !== undefined && patientData.address && patientData.address.length > 500) {
+    errors.address = 'Address must not exceed 500 characters';
+  }
+
+  if (patientData.status !== undefined && patientData.status) {
+    const valid = ['ARRIVED', 'WAITING', 'IN_CLINICAL', 'PENDING_TREATMENT', 'IN_PHARMACY', 'IN_OPTICAL', 'PENDING_BILLING', 'COMPLETED', 'CANCELLED'];
+    if (!valid.includes(patientData.status)) errors.status = 'Invalid status';
+  }
+
+  const maxLen = (val, max) => val && val.length > max;
+  if (patientData.chiefComplaint !== undefined && maxLen(patientData.chiefComplaint, 2000)) errors.chiefComplaint = 'Chief complaint must not exceed 2000 characters';
+  if (patientData.clinicalNotes !== undefined && maxLen(patientData.clinicalNotes, 10000)) errors.clinicalNotes = 'Clinical notes must not exceed 10000 characters';
+  if (patientData.consultationNotes !== undefined && maxLen(patientData.consultationNotes, 10000)) errors.consultationNotes = 'Consultation notes must not exceed 10000 characters';
+  if (patientData.diagnosis !== undefined && maxLen(patientData.diagnosis, 1000)) errors.diagnosis = 'Diagnosis must not exceed 1000 characters';
+
+  return { isValid: Object.keys(errors).length === 0, errors };
+};
+
+/**
  * Validate prescription data
  */
 export const validatePrescription = (prescriptionData) => {

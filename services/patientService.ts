@@ -3,7 +3,56 @@
  * Handles all patient-related API calls with proper authentication
  */
 
+import type { Patient } from '../types';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+/**
+ * True when API persistence can be used (auth token + API URL configured).
+ */
+export const isApiAvailable = (): boolean => {
+  const token = typeof window !== 'undefined' ? sessionStorage.getItem('authToken') : null;
+  return !!(token && API_BASE_URL);
+};
+
+/**
+ * Map API patient (snake_case or backend shape) to frontend Patient.
+ */
+export const mapPatientFromApi = (raw: Record<string, unknown>): Patient => {
+  const p = raw as any;
+  return {
+    id: p.id ?? p.patient_number ?? '',
+    name: p.name ?? '',
+    phone: p.phone ?? '',
+    email: p.email ?? undefined,
+    dob: p.dob ?? '',
+    address: p.address ?? undefined,
+    gender: p.gender ?? 'Male',
+    insuranceType: p.insurance_type ?? p.insuranceType ?? 'CASH',
+    insuranceProvider: p.insurance_provider ?? p.insuranceProvider,
+    insuranceNumber: p.insurance_policy_number ?? p.insurance_member_number ?? p.insuranceNumber,
+    nhifAuthNumber: p.nhif_auth_number ?? p.nhifAuthNumber,
+    status: p.status ?? 'WAITING',
+    assignedProviderId: p.assigned_provider_id ?? p.assignedProviderId,
+    checkedInAt: p.checked_in_at ?? p.checkedInAt ?? p.created_at ?? new Date().toISOString(),
+    chiefComplaint: p.chief_complaint ?? p.chiefComplaint,
+    clinicalNotes: p.clinical_notes ?? p.clinicalNotes,
+    consultationNotes: p.consultation_notes ?? p.consultationNotes,
+    ophthalmologistNotes: p.ophthalmologist_notes ?? p.ophthalmologistNotes,
+    diagnosis: p.diagnosis ?? undefined,
+    appointment: p.appointment ?? p.appointment,
+    prescription: p.prescription ?? undefined,
+    billItems: Array.isArray(p.billItems) ? p.billItems : Array.isArray(p.bill_items) ? (p.bill_items as any[]).map((b: any) => ({
+      id: b.external_id ?? b.id,
+      description: b.description,
+      amount: typeof b.amount === 'number' ? b.amount : parseFloat(b.amount) || 0,
+      category: b.category,
+      isCoveredByNHIF: !!(b.is_covered_by_nhif ?? b.isCoveredByNHIF),
+      isCoveredByPrivate: (b.is_covered_by_private ?? b.isCoveredByPrivate) !== false,
+    })) : [],
+    prescriptionHistory: p.prescriptionHistory ?? [],
+  };
+};
 
 /**
  * Get authorization header

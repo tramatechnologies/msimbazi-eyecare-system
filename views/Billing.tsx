@@ -3,7 +3,6 @@ import React, { useState } from 'react';
 import { PatientStatus, InsuranceType } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
-import * as patientService from '../services/patientService';
 import { calculateBillTotal, calculateInsuranceCoverage, isInsuranceEligible } from '../utils/patientUtils';
 import { formatISODate, getCurrentDate } from '../utils/dateTimeUtils';
 
@@ -20,13 +19,12 @@ const Billing: React.FC = () => {
       showError('Please select a patient');
       return;
     }
-    
-    try {
-      await patientService.updatePatient(selectedId, { status: PatientStatus.COMPLETED });
+    const result = await updatePatient(selectedId, { status: PatientStatus.COMPLETED });
+    if (result.success) {
       showSuccess(`Payment Processed Successfully for ${activePatient.name}`);
       setSelectedId(null);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to process payment');
+    } else {
+      showError(result.error ?? 'Failed to process payment');
     }
   };
 
@@ -80,7 +78,7 @@ const Billing: React.FC = () => {
                 <h2 className="text-base font-bold text-slate-900 tracking-tight mb-3">{activePatient.name}</h2>
                 <div className="flex gap-3 flex-wrap">
                   <span className={`text-xs px-3 py-1.5 rounded-lg font-semibold ${
-                    activePatient.insuranceType === InsuranceType.NHIF ? 'bg-brand-primary text-white' : 
+                    activePatient.insuranceType === InsuranceType.NHIF ? 'text-white' : 
                     activePatient.insuranceType === InsuranceType.PRIVATE ? 'bg-purple-600 text-white' : 'bg-slate-900 text-white'
                   }`}>
                     {activePatient.insuranceType === InsuranceType.PRIVATE && activePatient.insuranceProvider 
@@ -159,7 +157,16 @@ const Billing: React.FC = () => {
                   </button>
                   <button 
                     onClick={handleProcessPayment}
-                    className="px-8 h-12 bg-brand-primary text-white rounded-xl font-semibold text-sm shadow-lg hover:bg-brand-primary-light active:scale-95 transition-all"
+                    className="px-8 h-12 text-white rounded-xl font-semibold text-sm shadow-lg active:scale-95 transition-all"
+                    style={{
+                      backgroundColor: 'var(--brand-primary)',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--brand-primary-light)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                    }}
                   >
                     Confirm & Complete Checkout
                   </button>

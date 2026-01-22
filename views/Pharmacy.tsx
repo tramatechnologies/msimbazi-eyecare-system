@@ -3,7 +3,6 @@ import React, { useState } from 'react';
 import { PatientStatus, Medication, BillItem, InsuranceType } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
-import * as patientService from '../services/patientService';
 import { generateBillItemId } from '../utils/idGenerator';
 import { isInsuranceEligible } from '../utils/patientUtils';
 
@@ -52,16 +51,16 @@ const Pharmacy: React.FC = () => {
       isCoveredByPrivate: item.med.isCoveredByPrivate
     }));
 
-    try {
-      await patientService.updatePatient(activePatient.id, {
-        status: PatientStatus.PENDING_BILLING,
-        billItems: [...activePatient.billItems, ...newBillItems]
-      });
+    const result = await updatePatient(activePatient.id, {
+      status: PatientStatus.PENDING_BILLING,
+      billItems: [...activePatient.billItems, ...newBillItems]
+    });
+    if (result.success) {
       showSuccess('Dispensing recorded for checkout');
       setSelectedId(null);
       setDispensingItems([]);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to record dispensing');
+    } else {
+      showError(result.error ?? 'Failed to record dispensing');
     }
   };
 

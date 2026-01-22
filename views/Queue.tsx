@@ -29,9 +29,10 @@ const Queue: React.FC = () => {
               onClick={() => setFilterStatus(status)}
               className={`px-4 py-2 rounded-lg text-xs font-semibold uppercase tracking-wide transition-all ${
                 filterStatus === status 
-                  ? 'bg-brand-primary text-white shadow-md' 
+                  ? 'text-white shadow-md' 
                   : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
               }`}
+              style={filterStatus === status ? { backgroundColor: 'var(--brand-primary)' } : {}}
             >
               {status.replace('_', ' ')}
             </button>

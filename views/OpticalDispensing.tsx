@@ -3,7 +3,6 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { PatientStatus, PrescriptionHistoryEvent, InsuranceType } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
-import * as patientService from '../services/patientService';
 import { generateBillItemId } from '../utils/idGenerator';
 
 const LENS_TYPES = [
@@ -114,20 +113,20 @@ const OpticalDispensing: React.FC = () => {
       ? 'Optical order submitted. Patient routed to Pharmacy for medications.'
       : 'Optical order submitted for billing';
     
-    try {
-      await patientService.updatePatient(activePatient.id, {
-        status: nextStatus,
-        prescription: { ...activePatient.prescription, od, os, addOd, addOs, edgeColor },
-        billItems: [
-          ...activePatient.billItems,
-          { id: generateBillItemId(), description: `Frame: ${frameDetails}`, amount: framePrice, category: 'OPTICAL', isCoveredByNHIF: claimFrameNHIF, isCoveredByPrivate: true },
-          { id: generateBillItemId(), description: `Lens Engineering: ${lensType}`, amount: pricingSummary.subtotalLens, category: 'OPTICAL', isCoveredByNHIF: claimLensNHIF, isCoveredByPrivate: true }
-        ]
-      });
+    const result = await updatePatient(activePatient.id, {
+      status: nextStatus,
+      prescription: { ...activePatient.prescription, od, os, addOd, addOs, edgeColor },
+      billItems: [
+        ...activePatient.billItems,
+        { id: generateBillItemId(), description: `Frame: ${frameDetails}`, amount: framePrice, category: 'OPTICAL', isCoveredByNHIF: claimFrameNHIF, isCoveredByPrivate: true },
+        { id: generateBillItemId(), description: `Lens Engineering: ${lensType}`, amount: pricingSummary.subtotalLens, category: 'OPTICAL', isCoveredByNHIF: claimLensNHIF, isCoveredByPrivate: true }
+      ]
+    });
+    if (result.success) {
       showSuccess(successMessage);
       setSelectedId(null);
-    } catch (error) {
-      showError(error instanceof Error ? error.message : 'Failed to submit order');
+    } else {
+      showError(result.error ?? 'Failed to submit order');
     }
   };
 
@@ -137,7 +136,12 @@ const OpticalDispensing: React.FC = () => {
         <h3 className="font-black text-slate-800 text-[10px] uppercase tracking-widest px-2">Order Queue</h3>
         <div className="flex-1 overflow-y-auto space-y-3 px-2 custom-scrollbar">
           {opticalQueue.map(p => (
-            <button key={p.id} onClick={() => setSelectedId(p.id)} className={`w-full p-5 rounded-[2rem] text-left border transition-all ${selectedId === p.id ? 'bg-brand-primary border-brand-primary text-white shadow-xl translate-x-1' : 'bg-white border-slate-200'}`}>
+            <button 
+              key={p.id} 
+              onClick={() => setSelectedId(p.id)} 
+              className={`w-full p-5 rounded-[2rem] text-left border transition-all ${selectedId === p.id ? 'border-brand-primary text-white shadow-xl translate-x-1' : 'bg-white border-slate-200'}`}
+              style={selectedId === p.id ? { backgroundColor: 'var(--brand-primary)', borderColor: 'var(--brand-primary)' } : {}}
+            >
               <div className="flex justify-between items-start mb-2"> <span className="font-black truncate">{p.name}</span> <span className={`text-[8px] px-2 py-0.5 rounded-full font-black uppercase ${selectedId === p.id ? 'bg-brand-primary-light' : 'bg-slate-100'}`}>{p.insuranceType}</span> </div>
               <p className={`text-[10px] font-bold ${selectedId === p.id ? 'text-white/80' : 'text-slate-400'}`}>ID: {p.id}</p>
             </button>
