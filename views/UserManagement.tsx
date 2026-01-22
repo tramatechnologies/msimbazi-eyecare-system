@@ -3,10 +3,12 @@
  * Admin-only view for managing system users
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { UserRole } from '../types';
 import { createUser, getAllUsers, updateUserRole, deleteUser, User } from '../services/userService';
 import { useToast } from '../components/Toast';
+import { exportToPDF, exportToExcel, exportToCSV, ExportData } from '../utils/exportUtils';
+import { getCurrentDate } from '../utils/dateTimeUtils';
 
 const UserManagement: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -16,6 +18,8 @@ const UserManagement: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const { success: showSuccess, error: showError } = useToast();
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -154,6 +158,78 @@ const UserManagement: React.FC = () => {
     return role.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
   };
 
+  // Export functions
+  const prepareExportData = (): ExportData => {
+    const userRows = filteredUsers.map(user => [
+      user.name || 'N/A',
+      user.email,
+      getRoleDisplayName(user.role),
+      user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A',
+      user.last_sign_in_at ? new Date(user.last_sign_in_at).toLocaleDateString() : 'Never',
+    ]);
+
+    return {
+      title: 'User Management Report',
+      summary: [
+        { label: 'Total Users', value: filteredUsers.length },
+        { label: 'Role Filter', value: roleFilter === 'all' ? 'All Roles' : getRoleDisplayName(roleFilter) },
+        { label: 'Generated', value: getCurrentDate() },
+      ],
+      tables: [{
+        title: 'System Users',
+        headers: ['Name', 'Email', 'Role', 'Created Date', 'Last Sign In'],
+        rows: userRows,
+      }],
+    };
+  };
+
+  const handleExportPDF = async () => {
+    if (filteredUsers.length === 0) {
+      showError('No users to export');
+      return;
+    }
+    const data = prepareExportData();
+    await exportToPDF(data);
+    showSuccess('User list exported as PDF');
+  };
+
+  const handleExportExcel = () => {
+    if (filteredUsers.length === 0) {
+      showError('No users to export');
+      return;
+    }
+    const data = prepareExportData();
+    exportToExcel(data);
+    showSuccess('User list exported as Excel');
+  };
+
+  const handleExportCSV = () => {
+    if (filteredUsers.length === 0) {
+      showError('No users to export');
+      return;
+    }
+    const data = prepareExportData();
+    exportToCSV(data);
+    showSuccess('User list exported as CSV');
+  };
+
+  // Close export menu when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+
+    if (exportMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [exportMenuOpen]);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -161,25 +237,73 @@ const UserManagement: React.FC = () => {
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900">User Management</h1>
           <p className="text-sm text-slate-500 font-medium mt-1">Manage system users and permissions</p>
         </div>
-        <button
-          onClick={() => {
-            resetForm();
-            setShowAddForm(true);
-          }}
-          className="w-full sm:w-auto px-6 py-3 text-white rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
-          style={{
-            background: 'linear-gradient(to right, var(--brand-primary), var(--brand-secondary))',
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(to right, var(--brand-primary-dark), var(--brand-secondary-dark))';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'linear-gradient(to right, var(--brand-primary), var(--brand-secondary))';
-          }}
-        >
-          <i className="fas fa-user-plus"></i>
-          <span>Add New User</span>
-        </button>
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              onClick={() => setExportMenuOpen(!exportMenuOpen)}
+              disabled={filteredUsers.length === 0}
+              className="px-6 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-semibold text-sm hover:bg-slate-50 transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <i className="fas fa-download"></i>
+              Export Users
+              <i className={`fas fa-chevron-${exportMenuOpen ? 'up' : 'down'} text-xs`}></i>
+            </button>
+            
+            {exportMenuOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200 shadow-lg z-50 overflow-hidden">
+                <button
+                  onClick={() => {
+                    handleExportPDF();
+                    setExportMenuOpen(false);
+                  }}
+                  className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
+                >
+                  <i className="fas fa-file-pdf text-red-600"></i>
+                  Export as PDF
+                </button>
+                <button
+                  onClick={() => {
+                    handleExportExcel();
+                    setExportMenuOpen(false);
+                  }}
+                  className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
+                >
+                  <i className="fas fa-file-excel text-green-600"></i>
+                  Export as Excel
+                </button>
+                <button
+                  onClick={() => {
+                    handleExportCSV();
+                    setExportMenuOpen(false);
+                  }}
+                  className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3"
+                >
+                  <i className="fas fa-file-csv text-blue-600"></i>
+                  Export as CSV
+                </button>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => {
+              resetForm();
+              setShowAddForm(true);
+            }}
+            className="w-full sm:w-auto px-6 py-3 text-white rounded-xl font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
+            style={{
+              background: 'linear-gradient(to right, var(--brand-primary), var(--brand-secondary))',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(to right, var(--brand-primary-dark), var(--brand-secondary-dark))';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'linear-gradient(to right, var(--brand-primary), var(--brand-secondary))';
+            }}
+          >
+            <i className="fas fa-user-plus"></i>
+            <span>Add New User</span>
+          </button>
+        </div>
       </div>
 
       {/* Add User Form Modal */}

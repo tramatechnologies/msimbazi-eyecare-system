@@ -47,6 +47,12 @@ import {
   generateCSRFToken,
   storeCSRFToken,
 } from './security.js';
+import {
+  getNHIFToken,
+  verifyNHIFCard,
+  storeNHIFVerification,
+  getActiveNHIFVerification,
+} from './nhif.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -1005,6 +1011,417 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
   });
+});
+
+// =============================================================================
+// NHIF API Endpoints
+// =============================================================================
+
+/**
+ * POST /api/nhif/verify
+ * Verify NHIF card and store verification result
+ */
+app.post('/api/nhif/verify', authMiddleware, writeRateLimiter, csrfProtection, roleMiddleware(['receptionist', 'super_admin', 'clinic_manager']), async (req, res) => {
+  try {
+    const { cardNo, visitTypeId, referralNo, remarks, visitId } = req.body;
+
+    // Validation
+    if (!cardNo || !cardNo.trim()) {
+      return res.status(400).json({ error: 'Card number is required' });
+    }
+    if (!visitTypeId || ![1, 2, 3, 4].includes(parseInt(visitTypeId))) {
+      return res.status(400).json({ error: 'Valid visit type ID (1-4) is required' });
+    }
+    if (!visitId) {
+      return res.status(400).json({ error: 'Visit ID is required' });
+    }
+
+    // Validate referral number for Referral (3) and Follow-up (4)
+    if ((visitTypeId === 3 || visitTypeId === 4) && (!referralNo || referralNo.trim() === '')) {
+      return res.status(400).json({ error: 'Referral number is required for Referral and Follow-up visits' });
+    }
+
+    // Verify visit exists
+    const { data: visit, error: visitError } = await supabase
+      .from('visits')
+      .select('*')
+      .eq('id', visitId)
+      .single();
+
+    if (visitError || !visit) {
+      return res.status(404).json({ error: 'Visit not found' });
+    }
+
+    // Verify NHIF card
+    const verifyResult = await verifyNHIFCard({
+      cardNo: cardNo.trim(),
+      visitTypeId: parseInt(visitTypeId),
+      referralNo: referralNo?.trim() || undefined,
+      remarks: remarks?.trim() || undefined,
+    });
+
+    if (!verifyResult.success) {
+      // Log failed verification attempt
+      await logSecurityEvent({
+        userId: req.user.sub,
+        action: 'NHIF_VERIFY',
+        severity: 'medium',
+        metadata: {
+          visitId,
+          cardNo: cardNo.substring(0, 4) + '****', // Partial card number for security
+          visitTypeId,
+          error: verifyResult.error,
+        },
+      });
+
+      return res.status(400).json({
+        success: false,
+        authorizationStatus: verifyResult.authorizationStatus || 'REJECTED',
+        error: verifyResult.error || 'NHIF verification failed',
+      });
+    }
+
+    // Store verification in database
+    const storeResult = await storeNHIFVerification({
+      visitId,
+      cardNo: cardNo.trim(),
+      visitTypeId: parseInt(visitTypeId),
+      referralNo: referralNo?.trim() || null,
+      remarksSent: remarks?.trim() || null,
+      cardStatus: verifyResult.cardStatus,
+      authorizationStatus: verifyResult.authorizationStatus,
+      authorizationNo: verifyResult.authorizationNo,
+      memberName: verifyResult.memberName,
+      responsePayload: verifyResult.responsePayload,
+      verifiedBy: req.user.sub,
+    });
+
+    if (!storeResult.success) {
+      return res.status(500).json({ error: 'Failed to store verification result' });
+    }
+
+    // Log successful verification
+    await logSecurityEvent({
+      userId: req.user.sub,
+      action: 'NHIF_VERIFY',
+      severity: 'info',
+      metadata: {
+        visitId,
+        authorizationStatus: verifyResult.authorizationStatus,
+        authorizationNo: verifyResult.authorizationNo,
+      },
+    });
+
+    res.json({
+      success: true,
+      authorizationStatus: verifyResult.authorizationStatus,
+      authorizationNo: verifyResult.authorizationNo,
+      cardStatus: verifyResult.cardStatus,
+      memberName: verifyResult.memberName,
+      remarks: verifyResult.remarks,
+      verificationId: storeResult.verification.id,
+    });
+  } catch (err) {
+    console.error('NHIF verify error:', err);
+    res.status(500).json({ error: 'Internal server error during NHIF verification' });
+  }
+});
+
+/**
+ * GET /api/nhif/verification/:visitId
+ * Get active NHIF verification for a visit
+ */
+app.get('/api/nhif/verification/:visitId', authMiddleware, async (req, res) => {
+  try {
+    const { visitId } = req.params;
+
+    const result = await getActiveNHIFVerification(visitId);
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to fetch verification' });
+    }
+
+    res.json({ verification: result.verification });
+  } catch (err) {
+    console.error('Get NHIF verification error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/visits
+ * Create a new visit
+ */
+app.post('/api/visits', authMiddleware, writeRateLimiter, csrfProtection, roleMiddleware(['receptionist', 'super_admin', 'clinic_manager']), async (req, res) => {
+  try {
+    const { patientId, payerType, insuranceProvider, department } = req.body;
+
+    if (!patientId) {
+      return res.status(400).json({ error: 'Patient ID is required' });
+    }
+    if (!payerType || !['CASH', 'INSURANCE'].includes(payerType)) {
+      return res.status(400).json({ error: 'Valid payer type (CASH/INSURANCE) is required' });
+    }
+
+    // Verify patient exists
+    const { data: patient, error: patientError } = await supabase
+      .from('patients')
+      .select('id')
+      .eq('id', patientId)
+      .single();
+
+    if (patientError || !patient) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    const { data: visit, error: visitError } = await supabase
+      .from('visits')
+      .insert({
+        patient_id: patientId,
+        payer_type: payerType,
+        insurance_provider: insuranceProvider || null,
+        department: department || 'OPTOMETRY',
+        status: 'REGISTERED',
+        created_by: req.user.sub,
+      })
+      .select()
+      .single();
+
+    if (visitError) {
+      return res.status(400).json({ error: visitError.message || 'Failed to create visit' });
+    }
+
+    res.json({ success: true, visitId: visit.id, visit });
+  } catch (err) {
+    console.error('Create visit error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/visits/:id
+ * Get visit by ID
+ */
+app.get('/api/visits/:id', authMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: visit, error } = await supabase
+      .from('visits')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error || !visit) {
+      return res.status(404).json({ error: 'Visit not found' });
+    }
+
+    res.json({ visit });
+  } catch (err) {
+    console.error('Get visit error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/visits/patient/:patientId
+ * Get most recent active visit for a patient
+ */
+app.get('/api/visits/patient/:patientId', authMiddleware, async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    const { data: visits, error } = await supabase
+      .from('visits')
+      .select('*')
+      .eq('patient_id', patientId)
+      .in('status', ['REGISTERED', 'IN_PROGRESS'])
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (error) {
+      return res.status(400).json({ error: error.message || 'Failed to fetch visit' });
+    }
+
+    res.json({ visit: visits && visits.length > 0 ? visits[0] : null });
+  } catch (err) {
+    console.error('Get patient visit error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/nhif/config
+ * Get NHIF facility configuration (admin only)
+ */
+app.get('/api/nhif/config', authMiddleware, roleMiddleware(['super_admin']), async (req, res) => {
+  try {
+    const { data: config, error } = await supabase
+      .from('nhif_facility_config')
+      .select('*')
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      return res.status(400).json({ error: error.message || 'Failed to fetch NHIF config' });
+    }
+
+    // Mask password for security
+    if (config && config.nhif_password) {
+      config.nhif_password = '••••••••';
+    }
+
+    res.json({ config: config || null });
+  } catch (err) {
+    console.error('Get NHIF config error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/nhif/config
+ * Update NHIF facility configuration (admin only)
+ */
+app.post('/api/nhif/config', authMiddleware, writeRateLimiter, csrfProtection, roleMiddleware(['super_admin']), async (req, res) => {
+  try {
+    const { facilityCode, facilityName, nhifApiUrl, nhifUsername, nhifPassword } = req.body;
+
+    if (!facilityCode || !facilityCode.trim()) {
+      return res.status(400).json({ error: 'Facility code is required' });
+    }
+    if (!nhifUsername || !nhifUsername.trim()) {
+      return res.status(400).json({ error: 'NHIF username is required' });
+    }
+    if (!nhifPassword || nhifPassword === '••••••••') {
+      return res.status(400).json({ error: 'NHIF password is required' });
+    }
+
+    // Deactivate old configs
+    await supabase
+      .from('nhif_facility_config')
+      .update({ is_active: false })
+      .eq('is_active', true);
+
+    // Create new config
+    const { data: config, error } = await supabase
+      .from('nhif_facility_config')
+      .insert({
+        facility_code: facilityCode.trim(),
+        facility_name: facilityName.trim() || null,
+        nhif_api_url: nhifApiUrl.trim() || 'https://api.nhif.go.tz',
+        nhif_username: nhifUsername.trim(),
+        nhif_password: nhifPassword.trim(), // In production, encrypt this
+        is_active: true,
+        updated_by: req.user.sub,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(400).json({ error: error.message || 'Failed to save NHIF config' });
+    }
+
+    // Log security event
+    await logSecurityEvent({
+      userId: req.user.sub,
+      action: 'NHIF_CONFIG_UPDATE',
+      severity: 'high',
+      metadata: {
+        facilityCode: facilityCode.trim(),
+      },
+    });
+
+    res.json({ success: true, config });
+  } catch (err) {
+    console.error('Save NHIF config error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/nhif/test-connection
+ * Test NHIF API connection (admin only)
+ */
+app.post('/api/nhif/test-connection', authMiddleware, roleMiddleware(['super_admin']), async (req, res) => {
+  try {
+    // Get token to test connection
+    const tokenResult = await getNHIFToken();
+    
+    if (!tokenResult.success) {
+      return res.status(400).json({ 
+        success: false,
+        error: tokenResult.error || 'Failed to connect to NHIF API' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'NHIF API connection successful',
+      tokenType: tokenResult.tokenType,
+    });
+  } catch (err) {
+    console.error('Test NHIF connection error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * POST /api/visits/:id/convert-to-cash
+ * Convert visit from NHIF to CASH (override)
+ */
+app.post('/api/visits/:id/convert-to-cash', authMiddleware, writeRateLimiter, csrfProtection, roleMiddleware(['receptionist', 'super_admin', 'clinic_manager']), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || reason.trim() === '') {
+      return res.status(400).json({ error: 'Reason is required for cash conversion' });
+    }
+
+    // Get visit
+    const { data: visit, error: visitError } = await supabase
+      .from('visits')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (visitError || !visit) {
+      return res.status(404).json({ error: 'Visit not found' });
+    }
+
+    // Update visit to CASH
+    const { error: updateError } = await supabase
+      .from('visits')
+      .update({
+        payer_type: 'CASH',
+        insurance_provider: null,
+        updated_by: req.user.sub,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id);
+
+    if (updateError) {
+      return res.status(400).json({ error: updateError.message || 'Failed to convert visit' });
+    }
+
+    // Log cash conversion
+    await logSecurityEvent({
+      userId: req.user.sub,
+      action: 'NHIF_CASH_CONVERSION',
+      severity: 'medium',
+      metadata: {
+        visitId: id,
+        reason: reason.trim(),
+        previousPayerType: visit.payer_type,
+      },
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Convert visit to cash error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 // 404 handler

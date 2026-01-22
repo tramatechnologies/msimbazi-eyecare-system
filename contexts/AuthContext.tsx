@@ -263,6 +263,38 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
 
+      // Get backend API token for patient data operations
+      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+      if (API_BASE_URL) {
+        try {
+          // Call backend API login to get JWT token for API operations
+          const apiResponse = await fetch(`${API_BASE_URL}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email: email.toLowerCase().trim(),
+              password: password, // Note: In production, this should use a different flow
+            }),
+          });
+
+          if (apiResponse.ok) {
+            const apiData = await apiResponse.json();
+            if (apiData.accessToken) {
+              // Store backend API token for patient service
+              sessionStorage.setItem('authToken', apiData.accessToken);
+              if (apiData.csrfToken) {
+                sessionStorage.setItem('csrfToken', apiData.csrfToken);
+              }
+            }
+          } else {
+            console.warn('Backend API login failed, continuing with Supabase Auth only');
+          }
+        } catch (apiError) {
+          console.warn('Could not connect to backend API, using Supabase Auth only:', apiError);
+          // Continue with Supabase Auth even if backend API is unavailable
+        }
+      }
+
       setIsAuthenticated(true);
       setActiveRole(mapDatabaseRoleToUserRole(userRole.role));
       setUser({
@@ -295,13 +327,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(null);
         // Clear any stored session data
         if (typeof window !== 'undefined') {
-          // Clear all Supabase-related keys
-          Object.keys(localStorage).forEach(key => {
-            if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) {
-              localStorage.removeItem(key);
-            }
-          });
-          sessionStorage.clear();
+        // Clear all Supabase-related keys
+        Object.keys(localStorage).forEach(key => {
+          if (key.startsWith('sb-') || key.includes('supabase') || key.includes('auth-token')) {
+            localStorage.removeItem(key);
+          }
+        });
+        // Clear API tokens from sessionStorage
+        sessionStorage.removeItem('authToken');
+        sessionStorage.removeItem('csrfToken');
+        // Clear other session data
+        sessionStorage.clear();
         }
         return { success: true };
       }
@@ -314,7 +350,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setActiveRole(null);
       setUser(null);
 
-      // Explicitly clear Supabase session storage
+      // Explicitly clear Supabase session storage and API tokens
       if (typeof window !== 'undefined') {
         // Clear all Supabase-related keys from localStorage
         Object.keys(localStorage).forEach(key => {
@@ -322,7 +358,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             localStorage.removeItem(key);
           }
         });
-        sessionStorage.clear();
+        // Clear API tokens from sessionStorage
+        sessionStorage.removeItem('authToken');
+        sessionStorage.removeItem('csrfToken');
+        // Clear other session data but keep some items if needed
+        const keysToKeep: string[] = []; // Add any keys you want to preserve
+        const allKeys = Object.keys(sessionStorage);
+        allKeys.forEach(key => {
+          if (!keysToKeep.includes(key)) {
+            sessionStorage.removeItem(key);
+          }
+        });
       }
 
       if (error) {

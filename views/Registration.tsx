@@ -1,25 +1,36 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { InsuranceType, PatientStatus, InsuranceProvider, AppointmentType, AppointmentPriority, Patient } from '../types';
+import { InsuranceType, PatientStatus, InsuranceProvider, AppointmentType, AppointmentPriority, Patient, VisitType, AuthorizationStatus } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
+import { useAuth } from '../contexts/AuthContext';
 import * as patientService from '../services/patientService';
 import { sanitizeInput, validatePhone, validateDateOfBirth, validateName } from '../utils/validation';
 import { generateAuthNumber, generatePatientId } from '../utils/idGenerator';
 import { INSURANCE_PROVIDERS, HOSPITAL_PRICING } from '../constants';
 import { MOCK_PROVIDERS } from '../constants';
 import { getCurrentDate, getNextAvailableTime, formatDate, formatTime } from '../utils/dateTimeUtils';
+import { verifyNHIF, createVisit, getPatientVisit } from '../services/nhifService';
 
 type RegistrationStep = 'category' | 'patient-details' | 'insurance' | 'appointment' | 'billing-preview' | 'complete';
 
 const Registration: React.FC = () => {
   const { addPatient, updatePatient, patients, getPatient } = usePatients();
   const { success: showSuccess, error: showError } = useToast();
+  const { user } = useAuth();
   
   const [currentStep, setCurrentStep] = useState<RegistrationStep>('category');
   const [isVerifying, setIsVerifying] = useState(false);
   const [isVerified, setIsVerified] = useState(false);
   const [verificationError, setVerificationError] = useState<string>('');
+  const [verificationResult, setVerificationResult] = useState<{
+    authorizationStatus: AuthorizationStatus;
+    authorizationNo?: string;
+    cardStatus?: string;
+    memberName?: string;
+    remarks?: string;
+  } | null>(null);
+  const [currentVisitId, setCurrentVisitId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
@@ -40,6 +51,9 @@ const Registration: React.FC = () => {
     insuranceProvider: '' as InsuranceProvider | '',
     insuranceNumber: '',
     nhifAuthNumber: '',
+    visitTypeId: VisitType.NORMAL as VisitType,
+    referralNo: '',
+    nhifRemarks: '',
     
     // Appointment
     appointmentType: '' as AppointmentType | '',
@@ -109,28 +123,103 @@ const Registration: React.FC = () => {
 
   const handleVerifyNHIF = async () => {
     if (!formData.insuranceNumber.trim()) {
-      setVerificationError('Please enter NHIF membership number');
+      setVerificationError('Please enter NHIF card number');
+      return;
+    }
+
+    // Validate referral number for Referral (3) and Follow-up (4)
+    if ((formData.visitTypeId === 3 || formData.visitTypeId === 4) && !formData.referralNo.trim()) {
+      setVerificationError('Referral number is required for Referral and Follow-up visits');
       return;
     }
 
     setIsVerifying(true);
     setVerificationError('');
+    setVerificationResult(null);
     
-    // Simulate NHIF validation API call
-    setTimeout(() => {
-      // Simulate success/failure (80% success rate for demo)
-      const isValid = Math.random() > 0.2;
+    try {
+      // For new patients, we'll create visit after verification succeeds
+      // For returning patients, get or create visit
+      let visitId = currentVisitId;
       
-      setIsVerifying(false);
-      
-      if (isValid) {
-        setIsVerified(true);
-        setFormData(prev => ({ ...prev, nhifAuthNumber: generateAuthNumber() }));
-        showSuccess('NHIF membership validated successfully!');
+      if (selectedPatientId) {
+        const visitResult = await getPatientVisit(selectedPatientId);
+        if (visitResult.success && visitResult.visit) {
+          visitId = visitResult.visit.id;
+          setCurrentVisitId(visitResult.visit.id);
+        } else {
+          // Create new visit for returning patient
+          const newVisitResult = await createVisit(
+            selectedPatientId,
+            'INSURANCE',
+            'NHIF'
+          );
+          if (newVisitResult.success && newVisitResult.visitId) {
+            visitId = newVisitResult.visitId;
+            setCurrentVisitId(newVisitResult.visitId);
+          } else {
+            setVerificationError('Failed to create visit. Please try again.');
+            setIsVerifying(false);
+            return;
+          }
+        }
       } else {
-        setVerificationError('NHIF membership validation failed. Please check the number or proceed with cash payment.');
+        // For new patients, we need to create visit after patient is created
+        // For now, we'll create a temporary visit or skip verification until patient is saved
+        // In production, visit should be created first, then verification
+        setVerificationError('Please complete patient details first, then verify NHIF');
+        setIsVerifying(false);
+        return;
       }
-    }, 2000);
+
+      // Call real NHIF verification API
+      const verifyResult = await verifyNHIF(
+        {
+          cardNo: formData.insuranceNumber.trim(),
+          visitTypeId: formData.visitTypeId,
+          referralNo: formData.referralNo.trim() || undefined,
+          remarks: undefined, // Can be added later
+        },
+        visitId
+      );
+
+      setIsVerifying(false);
+
+      if (!verifyResult.success) {
+        setVerificationError(verifyResult.error || 'NHIF verification failed');
+        setVerificationResult({
+          authorizationStatus: verifyResult.authorizationStatus || AuthorizationStatus.REJECTED,
+        });
+        return;
+      }
+
+      // Store verification result
+      setVerificationResult({
+        authorizationStatus: verifyResult.authorizationStatus as AuthorizationStatus,
+        authorizationNo: verifyResult.authorizationNo,
+        cardStatus: verifyResult.cardStatus,
+        memberName: verifyResult.memberName,
+        remarks: verifyResult.remarks,
+      });
+
+      if (verifyResult.authorizationStatus === 'ACCEPTED') {
+        setIsVerified(true);
+        if (verifyResult.authorizationNo) {
+          setFormData(prev => ({ ...prev, nhifAuthNumber: verifyResult.authorizationNo! }));
+        }
+        showSuccess('NHIF card verified successfully!');
+      } else if (verifyResult.authorizationStatus === 'UNKNOWN') {
+        setIsVerified(true); // Allow service but with warning
+        showSuccess('NHIF verification completed with warning. Please verify at NHIF office.');
+      } else {
+        setIsVerified(false);
+        setVerificationError(`NHIF verification ${verifyResult.authorizationStatus.toLowerCase()}. ${verifyResult.remarks || 'Please check the card number or proceed with cash payment.'}`);
+      }
+    } catch (error: any) {
+      setIsVerifying(false);
+      setVerificationError(error.message || 'An error occurred during NHIF verification');
+      console.error('NHIF verification error:', error);
+    }
   };
 
   const handlePatientDetailsSubmit = () => {
@@ -185,19 +274,25 @@ const Registration: React.FC = () => {
     }
 
     // Check if NHIF validation is required and completed
-    if (formData.insuranceProvider === InsuranceProvider.NHIF && !isVerified) {
-      if (verificationError) {
-        // Show retry or cash options
-        if (!confirm('NHIF validation failed. Would you like to retry or proceed with cash payment?')) {
-          return;
-        }
-        // If user confirms, proceed with cash
-        setFormData({ ...formData, patientCategory: 'CASH' });
-        setCurrentStep('appointment');
+    if (formData.insuranceProvider === InsuranceProvider.NHIF) {
+      if (!isVerified || !verificationResult) {
+        showError('Please verify NHIF card before proceeding');
         return;
       }
-      showError('Please validate NHIF membership before proceeding');
-      return;
+      
+      // Block if rejected (unless converting to cash)
+      if (verificationResult.authorizationStatus === AuthorizationStatus.REJECTED || 
+          verificationResult.authorizationStatus === AuthorizationStatus.INVALID) {
+        showError('NHIF verification rejected. Please convert to CASH payment or contact NHIF office.');
+        return;
+      }
+      
+      // Allow UNKNOWN with warning, but user should be aware
+      if (verificationResult.authorizationStatus === AuthorizationStatus.UNKNOWN) {
+        if (!confirm('NHIF verification returned UNKNOWN status. Patient should verify at NHIF office. Continue anyway?')) {
+          return;
+        }
+      }
     }
 
     setCurrentStep('appointment');
@@ -371,6 +466,13 @@ const Registration: React.FC = () => {
     // Generate patient ID first so we can use it in the appointment
     const patientId = generatePatientId(patients);
 
+    // Create visit for insurance patients (especially NHIF)
+    let visitId = currentVisitId;
+    if (formData.patientCategory === 'INSURANCE') {
+      // For new patients, visit will be created after patient is saved
+      // For now, we'll create it after patient creation
+    }
+
     const patientData = {
       id: patientId, // Pre-generate ID so appointment can reference it
       name: sanitizeInput(formData.name), // Sanitize on submit
@@ -412,6 +514,31 @@ const Registration: React.FC = () => {
       const result = await addPatient(patientData);
       
       if (result.success && result.patient) {
+        // Create visit for insurance patients (if not already created)
+        if (formData.patientCategory === 'INSURANCE' && !currentVisitId) {
+          const visitResult = await createVisit(
+            result.patient.id,
+            'INSURANCE',
+            formData.insuranceProvider
+          );
+          if (visitResult.success && visitResult.visitId) {
+            setCurrentVisitId(visitResult.visitId);
+            
+            // If NHIF was verified before patient creation, re-verify with new visit ID
+            if (formData.insuranceProvider === InsuranceProvider.NHIF && verificationResult && verificationResult.authorizationStatus === AuthorizationStatus.ACCEPTED) {
+              // Re-verify with the new visit ID to store verification properly
+              await verifyNHIF(
+                {
+                  cardNo: formData.insuranceNumber.trim(),
+                  visitTypeId: formData.visitTypeId,
+                  referralNo: formData.referralNo.trim() || undefined,
+                },
+                visitResult.visitId
+              );
+            }
+          }
+        }
+        
         // Store the saved patient for display
         setSavedPatient(result.patient);
         
@@ -486,13 +613,13 @@ const Registration: React.FC = () => {
     return (
       <div className="max-w-3xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 px-8 py-6 text-white flex justify-between items-center">
+          <div className="bg-brand-primary-dark px-8 py-6 text-white flex justify-between items-center">
             <div>
               <h3 className="text-base font-bold tracking-tight">Patient Registration</h3>
-              <p className="text-slate-400 text-sm font-medium uppercase tracking-wide mt-1">Select Patient Category</p>
+              <p className="text-white/80 text-sm font-medium uppercase tracking-wide mt-1">Select Patient Category</p>
             </div>
             <div className="bg-brand-primary p-3 rounded-xl shadow-md">
-              <i className="fas fa-user-plus text-base"></i>
+              <i className="fas fa-user-plus text-base text-white"></i>
             </div>
           </div>
 
@@ -535,7 +662,7 @@ const Registration: React.FC = () => {
               >
                 <div className="flex items-center justify-between mb-4">
                   <div className="w-16 h-16 bg-brand-primary-100 rounded-xl flex items-center justify-center group-hover:bg-brand-primary transition-colors">
-                    <i className="fas fa-money-bill-wave text-2xl text-brand-primary group-hover:text-white"></i>
+                    <i className="fas fa-money-bill-wave text-2xl text-brand-primary group-hover:text-white transition-colors"></i>
                   </div>
                 </div>
                 <h4 className="text-base font-bold text-slate-900 mb-2">Cash Payment</h4>
@@ -566,18 +693,18 @@ const Registration: React.FC = () => {
     return (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 px-8 py-6 text-white flex justify-between items-center">
+          <div className="bg-brand-primary-dark px-8 py-6 text-white flex justify-between items-center">
             <div>
               <h3 className="text-base font-bold tracking-tight">Patient Demographics</h3>
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mt-1">
+              <p className="text-white/80 text-xs font-medium uppercase tracking-wide mt-1">
                 {formData.patientCategory} Patient
               </p>
             </div>
             <button
               onClick={() => setCurrentStep('category')}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-white/80 hover:text-white transition-colors"
             >
-              <i className="fas fa-arrow-left text-base"></i>
+              <i className="fas fa-arrow-left text-base text-white"></i>
             </button>
           </div>
 
@@ -626,7 +753,7 @@ const Registration: React.FC = () => {
                 />
                 {calculatedAge !== null && (
                   <p className="text-xs text-slate-600 mt-1 font-medium">
-                    <i className="fas fa-calendar-alt mr-1"></i>
+                    <i className="fas fa-calendar-alt mr-1 text-slate-600"></i>
                     Age: <span className="font-semibold">{calculatedAge} years old</span>
                   </p>
                 )}
@@ -688,18 +815,18 @@ const Registration: React.FC = () => {
     return (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 px-8 py-6 text-white flex justify-between items-center">
+          <div className="bg-brand-primary-dark px-8 py-6 text-white flex justify-between items-center">
             <div>
               <h3 className="text-base font-bold tracking-tight">Insurance Provider</h3>
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mt-1">
+              <p className="text-white/80 text-xs font-medium uppercase tracking-wide mt-1">
                 Select and validate insurance
               </p>
             </div>
             <button
               onClick={() => setCurrentStep('patient-details')}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-white/80 hover:text-white transition-colors"
             >
-              <i className="fas fa-arrow-left text-base"></i>
+              <i className="fas fa-arrow-left text-base text-white"></i>
             </button>
           </div>
 
@@ -749,8 +876,60 @@ const Registration: React.FC = () => {
                 </div>
 
                 {formData.insuranceProvider === InsuranceProvider.NHIF && (
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-slate-700">NHIF Authorization</label>
+                  <>
+                    {/* Visit Type Selection */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-700">
+                        Visit Type <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        required
+                        value={formData.visitTypeId}
+                        onChange={(e) => {
+                          const newVisitType = parseInt(e.target.value) as VisitType;
+                          setFormData({ 
+                            ...formData, 
+                            visitTypeId: newVisitType,
+                            referralNo: (newVisitType === VisitType.REFERRAL || newVisitType === VisitType.FOLLOW_UP) ? formData.referralNo : ''
+                          });
+                          setIsVerified(false);
+                          setVerificationError('');
+                        }}
+                        className="w-full h-12 px-4 bg-white border border-slate-200 rounded-xl text-sm font-normal focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
+                      >
+                        <option value={VisitType.NORMAL}>1 - Normal Visit</option>
+                        <option value={VisitType.EMERGENCY}>2 - Emergency</option>
+                        <option value={VisitType.REFERRAL}>3 - Referral</option>
+                        <option value={VisitType.FOLLOW_UP}>4 - Follow-up</option>
+                      </select>
+                    </div>
+
+                    {/* Referral Number (Required for Referral and Follow-up) */}
+                    {(formData.visitTypeId === VisitType.REFERRAL || formData.visitTypeId === VisitType.FOLLOW_UP) && (
+                      <div className="space-y-2">
+                        <label className="text-xs font-semibold text-slate-700">
+                          Referral Number <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          required
+                          type="text"
+                          value={formData.referralNo}
+                          onChange={(e) => {
+                            setFormData({ ...formData, referralNo: e.target.value });
+                            setIsVerified(false);
+                            setVerificationError('');
+                          }}
+                          placeholder="Enter referral number"
+                          maxLength={50}
+                          className="w-full h-12 px-4 bg-white border border-slate-200 rounded-xl text-sm font-normal focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
+                        />
+                        <p className="text-xs text-slate-500">Required for Referral and Follow-up visits</p>
+                      </div>
+                    )}
+
+                    {/* NHIF Authorization */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold text-slate-700">NHIF Authorization</label>
                     <div className="flex gap-3">
                       <input
                         readOnly
@@ -777,12 +956,12 @@ const Registration: React.FC = () => {
                       >
                         {isVerifying ? (
                           <>
-                            <i className="fas fa-spinner fa-spin mr-2"></i>
+                            <i className="fas fa-spinner fa-spin mr-2 text-white"></i>
                             Validating...
                           </>
                         ) : isVerified ? (
                           <>
-                            <i className="fas fa-check mr-2"></i>
+                            <i className="fas fa-check mr-2 text-white"></i>
                             Verified
                           </>
                         ) : (
@@ -790,41 +969,98 @@ const Registration: React.FC = () => {
                         )}
                       </button>
                     </div>
+
+                    {/* Verification Result Display */}
+                    {verificationResult && (
+                      <div className={`p-4 rounded-xl border ${
+                        verificationResult.authorizationStatus === AuthorizationStatus.ACCEPTED
+                          ? 'bg-emerald-50 border-emerald-200'
+                          : verificationResult.authorizationStatus === AuthorizationStatus.UNKNOWN
+                          ? 'bg-yellow-50 border-yellow-200'
+                          : 'bg-red-50 border-red-200'
+                      }`}>
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <p className={`text-xs font-bold uppercase tracking-wide ${
+                              verificationResult.authorizationStatus === AuthorizationStatus.ACCEPTED
+                                ? 'text-emerald-700'
+                                : verificationResult.authorizationStatus === AuthorizationStatus.UNKNOWN
+                                ? 'text-yellow-700'
+                                : 'text-red-700'
+                            }`}>
+                              Status: {verificationResult.authorizationStatus}
+                            </p>
+                            {verificationResult.authorizationNo && (
+                              <p className="text-xs text-slate-600 mt-1">
+                                Auth No: <span className="font-mono font-semibold">{verificationResult.authorizationNo}</span>
+                              </p>
+                            )}
+                            {verificationResult.memberName && (
+                              <p className="text-xs text-slate-600 mt-1">
+                                Member: {verificationResult.memberName}
+                              </p>
+                            )}
+                            {verificationResult.cardStatus && (
+                              <p className="text-xs text-slate-600 mt-1">
+                                Card Status: {verificationResult.cardStatus}
+                              </p>
+                            )}
+                          </div>
+                          {verificationResult.authorizationNo && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(verificationResult.authorizationNo!);
+                                showSuccess('Authorization number copied to clipboard');
+                              }}
+                              className="p-2 hover:bg-white/50 rounded-lg transition-colors"
+                              title="Copy authorization number"
+                            >
+                              <i className="fas fa-copy text-slate-600 text-xs"></i>
+                            </button>
+                          )}
+                        </div>
+                        {verificationResult.remarks && (
+                          <p className="text-xs text-slate-600 mt-2">{verificationResult.remarks}</p>
+                        )}
+                        {verificationResult.authorizationStatus === AuthorizationStatus.UNKNOWN && (
+                          <p className="text-xs text-yellow-700 font-semibold mt-2">
+                            ⚠️ Warning: Please verify at NHIF office
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {verificationError && (
                       <div className="p-4 bg-red-50 border border-red-200 rounded-xl">
                         <p className="text-xs text-red-700 font-semibold mb-2">{verificationError}</p>
-                        <div className="flex gap-2">
+                        {verificationResult?.authorizationStatus === AuthorizationStatus.REJECTED && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setVerificationError('');
-                              setIsVerified(false);
-                              handleVerifyNHIF();
+                            onClick={async () => {
+                              if (currentVisitId && window.confirm('Convert this visit to CASH payment? This action will be logged.')) {
+                                // Convert to cash - this would call the API
+                                showSuccess('Visit converted to CASH. Please proceed with cash payment.');
+                                setFormData(prev => ({ ...prev, patientCategory: 'CASH', insuranceProvider: '' as InsuranceProvider }));
+                                setIsVerified(false);
+                                setVerificationResult(null);
+                              }
                             }}
-                            className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-all"
+                            className="mt-2 px-4 py-2 bg-white border border-red-300 text-red-700 rounded-lg text-xs font-semibold hover:bg-red-50 transition-colors"
                           >
-                            Retry
+                            Convert to CASH Payment
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormData({ ...formData, patientCategory: 'CASH' });
-                              setCurrentStep('appointment');
-                            }}
-                            className="px-4 py-2 bg-slate-600 text-white rounded-lg text-xs font-semibold hover:bg-slate-700 transition-all"
-                          >
-                            Proceed with Cash
-                          </button>
-                        </div>
+                        )}
                       </div>
                     )}
                   </div>
+                  </>
                 )}
 
                 {formData.insuranceProvider !== InsuranceProvider.NHIF && (
-                  <div className="p-4 bg-blue-50 border border-brand-primary-100 rounded-xl">
+                  <div className="p-4 bg-brand-primary-50 border border-brand-primary-100 rounded-xl">
                     <p className="text-xs text-brand-primary-dark">
-                      <i className="fas fa-info-circle mr-2"></i>
+                      <i className="fas fa-info-circle mr-2 text-brand-primary-dark"></i>
                       No validation required for {formData.insuranceProvider}. You may proceed.
                     </p>
                   </div>
@@ -866,18 +1102,18 @@ const Registration: React.FC = () => {
     return (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 px-8 py-6 text-white flex justify-between items-center">
+          <div className="bg-brand-primary-dark px-8 py-6 text-white flex justify-between items-center">
             <div>
               <h3 className="text-base font-bold tracking-tight">Appointment Scheduling</h3>
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mt-1">
+              <p className="text-white/80 text-xs font-medium uppercase tracking-wide mt-1">
                 Schedule patient appointment
               </p>
             </div>
             <button
               onClick={() => formData.patientCategory === 'CASH' ? setCurrentStep('patient-details') : setCurrentStep('insurance')}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-white/80 hover:text-white transition-colors"
             >
-              <i className="fas fa-arrow-left text-base"></i>
+              <i className="fas fa-arrow-left text-base text-white"></i>
             </button>
           </div>
 
@@ -919,7 +1155,7 @@ const Registration: React.FC = () => {
                     className="text-xs text-brand-primary hover:text-brand-primary-dark font-semibold"
                     title="Set to today"
                   >
-                    <i className="fas fa-clock mr-1"></i>Today
+                    <i className="fas fa-clock mr-1 text-brand-primary"></i>Today
                   </button>
                 </label>
                 <input
@@ -941,7 +1177,7 @@ const Registration: React.FC = () => {
                     className="text-xs text-brand-primary hover:text-brand-primary-dark font-semibold"
                     title="Set to next available time"
                   >
-                    <i className="fas fa-clock mr-1"></i>Next Available
+                    <i className="fas fa-clock mr-1 text-brand-primary"></i>Next Available
                   </button>
                 </label>
                 <input
@@ -1009,18 +1245,18 @@ const Registration: React.FC = () => {
     return (
       <div className="max-w-4xl mx-auto space-y-6">
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-          <div className="bg-slate-900 px-8 py-6 text-white flex justify-between items-center">
+          <div className="bg-brand-primary-dark px-8 py-6 text-white flex justify-between items-center">
             <div>
               <h3 className="text-base font-bold tracking-tight">Billing Preview</h3>
-              <p className="text-slate-400 text-xs font-medium uppercase tracking-wide mt-1">
+              <p className="text-white/80 text-xs font-medium uppercase tracking-wide mt-1">
                 Review charges before confirmation
               </p>
             </div>
             <button
               onClick={() => setCurrentStep('appointment')}
-              className="text-slate-400 hover:text-white transition-colors"
+              className="text-white/80 hover:text-white transition-colors"
             >
-              <i className="fas fa-arrow-left text-base"></i>
+              <i className="fas fa-arrow-left text-base text-white"></i>
             </button>
           </div>
 

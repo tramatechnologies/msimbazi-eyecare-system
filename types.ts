@@ -6,7 +6,8 @@ export enum UserRole {
   OPTOMETRIST = 'OPTOMETRIST',
   OPTICAL_DISPENSER = 'OPTICAL_DISPENSER',
   PHARMACIST = 'PHARMACIST',
-  BILLING_OFFICER = 'BILLING_OFFICER'
+  BILLING_OFFICER = 'BILLING_OFFICER',
+  CLAIM_OFFICER = 'CLAIM_OFFICER'
 }
 
 export enum PatientStatus {
@@ -46,6 +47,55 @@ export enum AppointmentType {
 export enum AppointmentPriority {
   NORMAL = 'Normal',
   EMERGENCY = 'Emergency'
+}
+
+export enum VisitType {
+  NORMAL = 1,
+  EMERGENCY = 2,
+  REFERRAL = 3,
+  FOLLOW_UP = 4
+}
+
+export enum AuthorizationStatus {
+  ACCEPTED = 'ACCEPTED',
+  REJECTED = 'REJECTED',
+  PENDING = 'PENDING',
+  UNKNOWN = 'UNKNOWN',
+  INVALID = 'INVALID'
+}
+
+export interface Visit {
+  id: string;
+  patientId: string;
+  visitDate: string;
+  visitTime: string;
+  department: string;
+  payerType: 'CASH' | 'INSURANCE';
+  insuranceProvider?: string;
+  status: 'REGISTERED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+  updatedBy?: string;
+}
+
+export interface NHIFVerification {
+  id: string;
+  visitId: string;
+  cardNo: string;
+  visitTypeId: VisitType;
+  referralNo?: string;
+  remarksSent?: string;
+  cardStatus?: string;
+  authorizationStatus: AuthorizationStatus;
+  authorizationNo?: string;
+  memberName?: string;
+  responsePayload?: any;
+  verifiedBy: string;
+  verifiedAt: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Appointment {
@@ -104,6 +154,7 @@ export interface Patient {
   ophthalmologistNotes?: string;
   diagnosis?: string;
   appointment?: Appointment; // Current appointment
+  visitId?: string; // Current visit ID (for NHIF verification)
   prescription?: {
     od: string;
     os: string;

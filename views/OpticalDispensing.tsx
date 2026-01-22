@@ -5,6 +5,9 @@ import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import { generateBillItemId } from '../utils/idGenerator';
 import { createBillItem, createPrescription } from '../services/patientService';
+import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
+import { getPatientVisit } from '../services/nhifService';
+import { canDispenseOptical } from '../utils/nhifGating';
 
 const LENS_TYPES = [
   { name: 'Single Vision - Distance', basePrice: 20000, nhifEligible: true, nhifCap: 20000 },
@@ -61,6 +64,9 @@ const OpticalDispensing: React.FC = () => {
   const [claimLensNHIF, setClaimLensNHIF] = useState(false);
 
   const activePatient = patients.find(p => p.id === selectedId);
+  const [currentVisitId, setCurrentVisitId] = useState<string | null>(null);
+  const [nhifGateResult, setNhifGateResult] = useState<{ allowed: boolean; reason?: string } | null>(null);
+  
   const opticalQueue = patients.filter(p => p.status === PatientStatus.PENDING_BILLING || p.status === PatientStatus.IN_OPTICAL || (p.prescription && p.status !== PatientStatus.COMPLETED));
 
   // Refresh patient data when selected
@@ -71,6 +77,25 @@ const OpticalDispensing: React.FC = () => {
       });
     }
   }, [selectedId, refreshPatient]);
+
+  // Fetch visit ID for NHIF patients
+  useEffect(() => {
+    if (activePatient && activePatient.insuranceType === InsuranceType.NHIF) {
+      getPatientVisit(activePatient.id)
+        .then((result) => {
+          if (result.success && result.visit) {
+            setCurrentVisitId(result.visit.id);
+            canDispenseOptical(result.visit.id).then((gateResult) => {
+              setNhifGateResult(gateResult);
+            });
+          }
+        })
+        .catch(() => {});
+    } else {
+      setCurrentVisitId(null);
+      setNhifGateResult(null);
+    }
+  }, [activePatient]);
 
   useEffect(() => {
     if (activePatient) {
@@ -106,6 +131,15 @@ const OpticalDispensing: React.FC = () => {
     if (!activePatient) {
       showError('Please select a patient');
       return;
+    }
+
+    // Check NHIF service gate
+    if (activePatient.insuranceType === InsuranceType.NHIF && currentVisitId) {
+      const gateResult = await canDispenseOptical(currentVisitId);
+      if (!gateResult.allowed) {
+        showError(gateResult.reason || 'NHIF verification required before dispensing optical items');
+        return;
+      }
     }
 
     if (!frameDetails.trim() && framePrice === 0 && pricingSummary.subtotalLens === 0) {
@@ -237,8 +271,24 @@ const OpticalDispensing: React.FC = () => {
       </div>
       <div className="lg:col-span-3 flex flex-col overflow-hidden">
         {activePatient ? (
-          <div className="flex-1 bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
-            <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20">
+          <>
+            {/* NHIF Verification Badge */}
+            {activePatient.insuranceType === InsuranceType.NHIF && currentVisitId && (
+              <div className="mb-4">
+                <NHIFVerificationBadge visitId={currentVisitId} compact />
+                {nhifGateResult && !nhifGateResult.allowed && (
+                  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-xs font-semibold text-red-700">
+                      <i className="fas fa-ban mr-2"></i>
+                      {nhifGateResult.reason}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex-1 bg-white rounded-[3rem] border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
+              <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-20">
               <div> <h2 className="text-xl font-black text-slate-900 tracking-tight">{activePatient.name}</h2> <span className="text-[10px] font-black text-blue-500 uppercase tracking-widest">{activePatient.insuranceType} Dispensing</span> </div>
               <button 
                 onClick={handleCompleteDispensing} 
@@ -273,6 +323,7 @@ const OpticalDispensing: React.FC = () => {
               </div>
             </div>
           </div>
+          </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-[3rem] border border-dashed border-slate-200 p-12 text-center"> <div className="w-28 h-28 bg-slate-50 rounded-[2.5rem] flex items-center justify-center mb-8"> <i className="fas fa-glasses text-5xl text-slate-200"></i> </div> <h3 className="text-2xl font-black text-slate-900 mb-3 tracking-tight">Optical Fitting Workspace</h3> <p className="text-slate-400 max-w-sm font-medium uppercase text-[10px] tracking-widest">Select a patient order from the left to start fitting.</p> </div>
         )}

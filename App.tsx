@@ -12,7 +12,10 @@ import PatientsList from './views/PatientsList';
 import Appointments from './views/Appointments';
 import UserManagement from './views/UserManagement';
 import Reports from './views/Reports';
+import PerformanceReports from './views/PerformanceReports';
+import NHIFReports from './views/NHIFReports';
 import SystemSettings from './views/SystemSettings';
+import NHIFSettings from './views/NHIFSettings';
 import AuditLogs from './views/AuditLogs';
 import { PatientProvider, usePatients } from './contexts/PatientContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -69,7 +72,7 @@ const AppContent: React.FC = () => {
   }, [patients]);
 
   const maxStatusCount = useMemo(() => {
-    const vals = Object.values(statusDistribution);
+    const vals = Object.values(statusDistribution).map(v => Number(v));
     return Math.max(1, ...vals);
   }, [statusDistribution]);
 
@@ -81,15 +84,29 @@ const AppContent: React.FC = () => {
     switch (currentPage) {
       case 'dashboard':
         const isAdmin = activeRole === UserRole.ADMIN;
+        const isManager = activeRole === UserRole.MANAGER;
+        
+        // Calculate revenue for Manager/Admin dashboard
+        const totalRevenue = patients.reduce((sum, p) => {
+          return sum + p.billItems.reduce((s, item) => s + item.amount, 0);
+        }, 0);
+        
         const dashboardStats = isAdmin ? [
           { label: 'Total Patients', value: stats.total, icon: 'fa-users', color: 'bg-brand-primary', bgColor: 'bg-brand-primary-50' },
           { label: 'In Queue', value: stats.waiting, icon: 'fa-clock', color: 'bg-orange-500', bgColor: 'bg-orange-50' },
           { label: 'Clinical', value: stats.inClinical, icon: 'fa-stethoscope', color: 'bg-green-500', bgColor: 'bg-green-50' },
           { label: 'Pending Bill', value: stats.pendingBilling, icon: 'fa-receipt', color: 'bg-purple-500', bgColor: 'bg-purple-50' },
-          { label: 'Total Revenue', value: 'TZS 0', icon: 'fa-money-bill-wave', color: 'bg-emerald-500', bgColor: 'bg-emerald-50' },
+          { label: 'Total Revenue', value: `TZS ${totalRevenue.toLocaleString()}`, icon: 'fa-money-bill-wave', color: 'bg-emerald-500', bgColor: 'bg-emerald-50' },
           { label: 'Active Users', value: '0', icon: 'fa-user-shield', color: 'bg-blue-500', bgColor: 'bg-blue-50' },
           { label: 'Today\'s Appointments', value: '0', icon: 'fa-calendar-check', color: 'bg-cyan-500', bgColor: 'bg-cyan-50' },
           { label: 'System Health', value: '100%', icon: 'fa-heartbeat', color: 'bg-red-500', bgColor: 'bg-red-50' },
+        ] : isManager ? [
+          { label: 'Total Patients', value: stats.total, icon: 'fa-users', color: 'bg-brand-primary', bgColor: 'bg-brand-primary-50' },
+          { label: 'In Queue', value: stats.waiting, icon: 'fa-clock', color: 'bg-orange-500', bgColor: 'bg-orange-50' },
+          { label: 'Clinical', value: stats.inClinical, icon: 'fa-stethoscope', color: 'bg-green-500', bgColor: 'bg-green-50' },
+          { label: 'Pending Bill', value: stats.pendingBilling, icon: 'fa-receipt', color: 'bg-purple-500', bgColor: 'bg-purple-50' },
+          { label: 'Total Revenue', value: `TZS ${totalRevenue.toLocaleString()}`, icon: 'fa-money-bill-wave', color: 'bg-emerald-500', bgColor: 'bg-emerald-50' },
+          { label: 'Completed Today', value: patients.filter(p => p.status === PatientStatus.COMPLETED).length, icon: 'fa-check-circle', color: 'bg-green-600', bgColor: 'bg-green-50' },
         ] : [
           { label: 'Total Patients', value: stats.total, icon: 'fa-users', color: 'bg-brand-primary', bgColor: 'bg-brand-primary-50' },
           { label: 'In Queue', value: stats.waiting, icon: 'fa-clock', color: 'bg-orange-500', bgColor: 'bg-orange-50' },
@@ -99,24 +116,26 @@ const AppContent: React.FC = () => {
         
         return (
           <div className="space-y-8 max-w-7xl mx-auto">
-            {/* Welcome Section for Admin */}
-            {isAdmin && (
+            {/* Welcome Section for Admin and Manager */}
+            {(isAdmin || isManager) && (
               <div className="bg-gradient-to-r from-brand-primary to-brand-secondary rounded-2xl p-6 text-white">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-base font-bold mb-1">Welcome back, {user?.name || (user?.email ? user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Admin')}!</h2>
-                    <p className="text-sm text-white/80">System Administrator Dashboard</p>
+                    <h2 className="text-base font-bold mb-1">Welcome back, {user?.name || (user?.email ? user.email.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : (isAdmin ? 'Admin' : 'Manager'))}!</h2>
+                    <p className="text-sm text-white/80">{isAdmin ? 'System Administrator Dashboard' : 'Clinic Manager Dashboard'}</p>
                   </div>
                   <div className="hidden md:flex items-center gap-4">
                     <div className="text-right">
                       <p className="text-xs text-white/70">Quick Actions</p>
                       <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={() => handlePageChange('users')}
-                          className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold transition-all"
-                        >
-                          <i className="fas fa-user-shield mr-2"></i>Users
-                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handlePageChange('users')}
+                            className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold transition-all"
+                          >
+                            <i className="fas fa-user-shield mr-2"></i>Users
+                          </button>
+                        )}
                         <button
                           onClick={() => handlePageChange('reports')}
                           className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold transition-all"
@@ -124,11 +143,19 @@ const AppContent: React.FC = () => {
                           <i className="fas fa-chart-bar mr-2"></i>Reports
                         </button>
                         <button
-                          onClick={() => handlePageChange('settings')}
+                          onClick={() => handlePageChange('patients')}
                           className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold transition-all"
                         >
-                          <i className="fas fa-cog mr-2"></i>Settings
+                          <i className="fas fa-users mr-2"></i>Patients
                         </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => handlePageChange('settings')}
+                            className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-semibold transition-all"
+                          >
+                            <i className="fas fa-cog mr-2"></i>Settings
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -315,8 +342,14 @@ const AppContent: React.FC = () => {
         return <UserManagement />;
       case 'reports':
         return <Reports />;
+      case 'performance':
+        return <PerformanceReports />;
+      case 'nhif-reports':
+        return <NHIFReports />;
       case 'settings':
         return <SystemSettings />;
+      case 'nhif-settings':
+        return <NHIFSettings />;
       case 'audit':
         return <AuditLogs />;
       default:

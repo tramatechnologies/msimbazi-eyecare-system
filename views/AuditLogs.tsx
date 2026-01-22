@@ -3,7 +3,9 @@
  * Admin-only view for system audit trail
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import { exportToPDF, exportToExcel, exportToCSV, ExportData } from '../utils/exportUtils';
+import { getCurrentDate } from '../utils/dateTimeUtils';
 
 const AuditLogs: React.FC = () => {
   const [filters, setFilters] = useState({
@@ -11,6 +13,88 @@ const AuditLogs: React.FC = () => {
     user: 'all',
     dateRange: 'today',
   });
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  const handleExportPDF = async () => {
+    const data: ExportData = {
+      title: 'Audit Logs',
+      period: filters.dateRange,
+      summary: [
+        { label: 'Action Filter', value: filters.action },
+        { label: 'User Filter', value: filters.user },
+        { label: 'Date Range', value: filters.dateRange },
+      ],
+      tables: [{
+        title: 'Audit Log Entries',
+        headers: ['Timestamp', 'User', 'Action', 'Resource', 'Details'],
+        rows: [
+          ['No audit logs available', '', '', '', 'System activity logging will be available soon'],
+        ],
+      }],
+    };
+    await exportToPDF(data);
+    setExportMenuOpen(false);
+  };
+
+  const handleExportExcel = () => {
+    const data: ExportData = {
+      title: 'Audit Logs',
+      period: filters.dateRange,
+      summary: [
+        { label: 'Action Filter', value: filters.action },
+        { label: 'User Filter', value: filters.user },
+        { label: 'Date Range', value: filters.dateRange },
+      ],
+      tables: [{
+        title: 'Audit Log Entries',
+        headers: ['Timestamp', 'User', 'Action', 'Resource', 'Details'],
+        rows: [
+          ['No audit logs available', '', '', '', 'System activity logging will be available soon'],
+        ],
+      }],
+    };
+    exportToExcel(data);
+    setExportMenuOpen(false);
+  };
+
+  const handleExportCSV = () => {
+    const data: ExportData = {
+      title: 'Audit Logs',
+      period: filters.dateRange,
+      summary: [
+        { label: 'Action Filter', value: filters.action },
+        { label: 'User Filter', value: filters.user },
+        { label: 'Date Range', value: filters.dateRange },
+      ],
+      tables: [{
+        title: 'Audit Log Entries',
+        headers: ['Timestamp', 'User', 'Action', 'Resource', 'Details'],
+        rows: [
+          ['No audit logs available', '', '', '', 'System activity logging will be available soon'],
+        ],
+      }],
+    };
+    exportToCSV(data);
+    setExportMenuOpen(false);
+  };
+
+  // Close export menu when clicking outside
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setExportMenuOpen(false);
+      }
+    };
+
+    if (exportMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [exportMenuOpen]);
 
   return (
     <div className="space-y-6">
@@ -19,10 +103,42 @@ const AuditLogs: React.FC = () => {
           <h1 className="text-base font-bold text-slate-900">Audit Logs</h1>
           <p className="text-sm text-slate-500 font-medium mt-1">System activity and security audit trail</p>
         </div>
-        <button className="px-6 py-3 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all flex items-center gap-2">
-          <i className="fas fa-download"></i>
-          Export Logs
-        </button>
+        <div className="relative" ref={exportMenuRef}>
+          <button
+            onClick={() => setExportMenuOpen(!exportMenuOpen)}
+            className="px-6 py-3 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all flex items-center gap-2"
+          >
+            <i className="fas fa-download"></i>
+            Export Logs
+            <i className={`fas fa-chevron-${exportMenuOpen ? 'up' : 'down'} text-xs`}></i>
+          </button>
+          
+          {exportMenuOpen && (
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200 shadow-lg z-50 overflow-hidden">
+              <button
+                onClick={handleExportPDF}
+                className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
+              >
+                <i className="fas fa-file-pdf text-red-600"></i>
+                Export as PDF
+              </button>
+              <button
+                onClick={handleExportExcel}
+                className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
+              >
+                <i className="fas fa-file-excel text-green-600"></i>
+                Export as Excel
+              </button>
+              <button
+                onClick={handleExportCSV}
+                className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3"
+              >
+                <i className="fas fa-file-csv text-blue-600"></i>
+                Export as CSV
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Filters */}

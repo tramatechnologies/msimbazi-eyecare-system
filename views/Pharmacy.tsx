@@ -6,6 +6,9 @@ import { useToast } from '../components/Toast';
 import { generateBillItemId } from '../utils/idGenerator';
 import { isInsuranceEligible } from '../utils/patientUtils';
 import { createBillItem } from '../services/patientService';
+import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
+import { getPatientVisit } from '../services/nhifService';
+import { canDispenseMedications } from '../utils/nhifGating';
 
 const MOCK_MEDICATIONS: Medication[] = [
   { id: 'm1', name: 'Atropine Sulfate 1%', dosage: '10ml', form: 'Drops', price: 15000, stock: 45, isCoveredByNHIF: true, isCoveredByPrivate: true },
@@ -55,6 +58,15 @@ const Pharmacy: React.FC = () => {
     if (!activePatient || dispensingItems.length === 0) {
       showError('Please add medications to dispense');
       return;
+    }
+
+    // Check NHIF service gate
+    if (activePatient.insuranceType === InsuranceType.NHIF && currentVisitId) {
+      const gateResult = await canDispenseMedications(currentVisitId);
+      if (!gateResult.allowed) {
+        showError(gateResult.reason || 'NHIF verification required before dispensing medications');
+        return;
+      }
     }
 
     setIsDispensing(true);
@@ -129,8 +141,24 @@ const Pharmacy: React.FC = () => {
 
       <div className="lg:col-span-3 flex flex-col gap-6 overflow-hidden">
         {activePatient ? (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 h-full min-h-0">
-            <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+          <>
+            {/* NHIF Verification Badge */}
+            {activePatient.insuranceType === InsuranceType.NHIF && currentVisitId && (
+              <div>
+                <NHIFVerificationBadge visitId={currentVisitId} compact />
+                {nhifGateResult && !nhifGateResult.allowed && (
+                  <div className="mt-2 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-xs font-semibold text-red-700">
+                      <i className="fas fa-ban mr-2"></i>
+                      {nhifGateResult.reason}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 h-full min-h-0">
+              <div className="bg-white p-6 rounded-[2.5rem] border border-slate-200 shadow-sm flex flex-col overflow-hidden">
               <div className="relative mb-6">
                 <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-slate-300"></i>
                 <input type="text" placeholder="Search pharmacy stock..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-slate-50 border-none rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none" />
@@ -152,7 +180,7 @@ const Pharmacy: React.FC = () => {
                       </div>
                       <div className="text-right flex items-center gap-4">
                         <div className="mr-2"> <p className="text-sm font-black text-slate-900">TZS {med.price.toLocaleString()}</p> <p className={`text-[10px] font-bold ${med.stock < 10 ? 'text-red-500' : 'text-slate-400'}`}>Qty: {med.stock}</p> </div>
-                        <button onClick={() => handleAddToDispense(med)} disabled={med.stock <= 0} className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-2xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center"> <i className="fas fa-plus"></i> </button>
+                        <button onClick={() => handleAddToDispense(med)} disabled={med.stock <= 0} className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-2xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center"> <i className="fas fa-plus text-emerald-600 group-hover:text-white"></i> </button>
                       </div>
                     </div>
                   );
@@ -170,10 +198,10 @@ const Pharmacy: React.FC = () => {
                   <div key={item.med.id} className="bg-white/5 p-4 rounded-3xl border border-white/5 flex items-center justify-between">
                     <div> <p className="text-sm font-bold text-white">{item.med.name}</p> <p className="text-[10px] text-white/40">TZS {item.med.price.toLocaleString()} x {item.qty}</p> </div>
                     <div className="flex items-center gap-3">
-                      <button onClick={() => updateQty(item.med.id, -1)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"> <i className="fas fa-minus text-[10px]"></i> </button>
-                      <span className="font-black w-4 text-center">{item.qty}</span>
-                      <button onClick={() => updateQty(item.med.id, 1)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"> <i className="fas fa-plus text-[10px]"></i> </button>
-                      <button onClick={() => setDispensingItems(dispensingItems.filter(i => i.med.id !== item.med.id))} className="ml-2 text-red-400"> <i className="fas fa-trash-alt text-[10px]"></i> </button>
+                      <button onClick={() => updateQty(item.med.id, -1)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"> <i className="fas fa-minus text-[10px] text-white"></i> </button>
+                      <span className="font-black w-4 text-center text-white">{item.qty}</span>
+                      <button onClick={() => updateQty(item.med.id, 1)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"> <i className="fas fa-plus text-[10px] text-white"></i> </button>
+                      <button onClick={() => setDispensingItems(dispensingItems.filter(i => i.med.id !== item.med.id))} className="ml-2 text-red-400"> <i className="fas fa-trash-alt text-[10px] text-red-400"></i> </button>
                     </div>
                   </div>
                 ))}
@@ -190,6 +218,7 @@ const Pharmacy: React.FC = () => {
               </div>
             </div>
           </div>
+          </>
         ) : (
           <div className="h-full flex flex-col items-center justify-center bg-white rounded-[3rem] border border-dashed border-slate-200 p-12 text-center">
              <div className="w-24 h-24 bg-emerald-50 rounded-full flex items-center justify-center mb-6"> <i className="fas fa-pills text-4xl text-emerald-400 opacity-40"></i> </div>

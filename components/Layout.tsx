@@ -42,7 +42,10 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
     // Admin-specific menu items
     { id: 'users', label: 'User Management', icon: 'fa-user-shield', roles: [UserRole.ADMIN] },
     { id: 'reports', label: 'Reports & Analytics', icon: 'fa-chart-bar', roles: [UserRole.ADMIN, UserRole.MANAGER] },
+    { id: 'performance', label: 'Performance Reports', icon: 'fa-chart-line', roles: [UserRole.ADMIN, UserRole.MANAGER] },
+    { id: 'nhif-reports', label: 'NHIF Reports', icon: 'fa-shield-alt', roles: [UserRole.ADMIN, UserRole.MANAGER] },
     { id: 'settings', label: 'System Settings', icon: 'fa-cog', roles: [UserRole.ADMIN] },
+    { id: 'nhif-settings', label: 'NHIF Settings', icon: 'fa-shield-alt', roles: [UserRole.ADMIN] },
     { id: 'audit', label: 'Audit Logs', icon: 'fa-history', roles: [UserRole.ADMIN] },
   ];
 
@@ -182,7 +185,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
               } ${
                 currentPage === item.id 
                   ? 'text-white shadow-lg font-semibold' 
-                  : 'text-slate-300 hover:text-white'
+                  : 'text-slate-700'
               }`}
               style={currentPage === item.id 
                 ? {
@@ -196,17 +199,23 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
               onMouseEnter={(e) => {
                 if (currentPage !== item.id) {
                   e.currentTarget.style.backgroundColor = '#065f46'; // Dark green hover (Emerald-800)
+                  e.currentTarget.style.color = '#ffffff';
                 }
               }}
               onMouseLeave={(e) => {
                 if (currentPage !== item.id) {
                   e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#334155'; // slate-700
                 }
               }}
             >
-              <i className={`fas ${item.icon} text-base w-6 flex-shrink-0 text-center`}></i>
+              <i className={`fas ${item.icon} text-base w-6 flex-shrink-0 text-center ${
+                currentPage === item.id ? 'text-white' : 'text-slate-700'
+              }`} style={currentPage === item.id ? { color: '#ffffff' } : { color: '#334155' }}></i>
               {isSidebarOpen && (
-                <span className="font-medium text-sm whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100">
+                <span className={`font-medium text-sm whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 ${
+                  currentPage === item.id ? 'text-white' : 'text-slate-700'
+                }`} style={currentPage === item.id ? { color: '#ffffff' } : { color: '#334155' }}>
                   {item.label}
                 </span>
               )}

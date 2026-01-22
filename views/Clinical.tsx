@@ -4,6 +4,9 @@ import { PatientStatus, Provider, InsuranceType } from '../types';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import * as patientService from '../services/patientService';
+import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
+import { getPatientVisit } from '../services/nhifService';
+import { canStartConsultation } from '../utils/nhifGating';
 import { 
   getClinicalSupport, 
   getDiagnosisSuggestion, 
@@ -413,6 +416,8 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
   }>({});
 
   const activePatient = patients.find(p => p.id === selectedPatientId);
+  const [currentVisitId, setCurrentVisitId] = useState<string | null>(null);
+  const [nhifGateResult, setNhifGateResult] = useState<{ allowed: boolean; reason?: string } | null>(null);
 
   // When using API, fetch full patient details (incl. prescription, billItems) on select
   useEffect(() => {
@@ -420,6 +425,28 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
       refreshPatient(selectedPatientId).catch(() => {});
     }
   }, [useApi, selectedPatientId, refreshPatient]);
+
+  // Fetch visit ID for NHIF patients
+  useEffect(() => {
+    if (activePatient && activePatient.insuranceType === InsuranceType.NHIF) {
+      getPatientVisit(activePatient.id)
+        .then((result) => {
+          if (result.success && result.visit) {
+            setCurrentVisitId(result.visit.id);
+            // Check service gate
+            canStartConsultation(result.visit.id).then((gateResult) => {
+              setNhifGateResult(gateResult);
+            });
+          }
+        })
+        .catch(() => {
+          // Visit might not exist yet
+        });
+    } else {
+      setCurrentVisitId(null);
+      setNhifGateResult(null);
+    }
+  }, [activePatient]);
 
   // Load patient data when selectedPatientId changes
   useEffect(() => {
@@ -641,6 +668,15 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
 
   const handleComplete = async () => {
     if (!selectedPatientId || !activePatient) return;
+    
+    // Check NHIF service gate
+    if (activePatient.insuranceType === InsuranceType.NHIF && currentVisitId) {
+      const gateResult = await canStartConsultation(currentVisitId);
+      if (!gateResult.allowed) {
+        showError(gateResult.reason || 'NHIF verification required before completing consultation');
+        return;
+      }
+    }
     
     if (!chiefComplaint.trim()) {
       showError('Chief Complaint is required');
@@ -953,6 +989,10 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
               <p className="text-xs text-slate-500 font-medium font-mono">ID: {activePatient.id}</p>
             </div>
           </div>
+          {/* NHIF Badge in Header */}
+          {activePatient.insuranceType === InsuranceType.NHIF && currentVisitId && (
+            <NHIFVerificationBadge visitId={currentVisitId} compact />
+          )}
           <div className="flex gap-3">
             <button 
               onClick={handleAiInsight} 

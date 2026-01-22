@@ -5,6 +5,10 @@ import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import { calculateBillTotal, calculateInsuranceCoverage, isInsuranceEligible } from '../utils/patientUtils';
 import { formatDate, getCurrentDate } from '../utils/dateTimeUtils';
+import { generateInvoicePDF, generateReceiptPDF } from '../utils/invoiceUtils';
+import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
+import { getPatientVisit } from '../services/nhifService';
+import { canCreateInvoice } from '../utils/nhifGating';
 
 const Billing: React.FC = () => {
   const { patients, updatePatient, refreshPatient } = usePatients();
@@ -14,6 +18,8 @@ const Billing: React.FC = () => {
   
   const billingQueue = patients.filter(p => p.status === PatientStatus.PENDING_BILLING);
   const activePatient = patients.find(p => p.id === selectedId);
+  const [currentVisitId, setCurrentVisitId] = useState<string | null>(null);
+  const [nhifGateResult, setNhifGateResult] = useState<{ allowed: boolean; reason?: string } | null>(null);
 
   // Refresh patient data when selected
   useEffect(() => {
@@ -23,6 +29,45 @@ const Billing: React.FC = () => {
       });
     }
   }, [selectedId, refreshPatient]);
+
+  // Fetch visit ID for NHIF patients
+  useEffect(() => {
+    if (activePatient && activePatient.insuranceType === InsuranceType.NHIF) {
+      getPatientVisit(activePatient.id)
+        .then((result) => {
+          if (result.success && result.visit) {
+            setCurrentVisitId(result.visit.id);
+            canCreateInvoice(result.visit.id).then((gateResult) => {
+              setNhifGateResult(gateResult);
+            });
+          }
+        })
+        .catch(() => {});
+    } else {
+      setCurrentVisitId(null);
+      setNhifGateResult(null);
+    }
+  }, [activePatient]);
+
+  const handlePrintInvoice = async () => {
+    if (!activePatient) {
+      showError('Please select a patient');
+      return;
+    }
+
+    if (activePatient.billItems.length === 0) {
+      showError('No bill items to print');
+      return;
+    }
+
+    try {
+      await generateInvoicePDF(activePatient);
+      showSuccess('Invoice generated successfully');
+    } catch (error) {
+      showError('Failed to generate invoice');
+      console.error('Invoice generation error:', error);
+    }
+  };
 
   const handleProcessPayment = async () => {
     if (!selectedId || !activePatient) {
@@ -35,11 +80,31 @@ const Billing: React.FC = () => {
       return;
     }
 
+    // Check NHIF service gate
+    if (activePatient.insuranceType === InsuranceType.NHIF && currentVisitId) {
+      const gateResult = await canCreateInvoice(currentVisitId);
+      if (!gateResult.allowed) {
+        showError(gateResult.reason || 'NHIF verification required before processing payment');
+        return;
+      }
+    }
+
     setIsProcessing(true);
     try {
       const result = await updatePatient(selectedId, { status: PatientStatus.COMPLETED });
       if (result.success) {
         showSuccess(`Payment Processed Successfully for ${activePatient.name}`);
+        
+        // Generate receipt for cash clients
+        if (activePatient.insuranceType === InsuranceType.CASH) {
+          try {
+            await generateReceiptPDF(activePatient, 'Cash');
+          } catch (receiptError) {
+            console.error('Receipt generation error:', receiptError);
+            // Don't fail the payment if receipt generation fails
+          }
+        }
+        
         // Refresh patient data to get updated status
         await refreshPatient(selectedId);
         setSelectedId(null);
@@ -98,6 +163,21 @@ const Billing: React.FC = () => {
       <div className="lg:col-span-2">
         {activePatient ? (
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-full animate-in fade-in duration-300">
+            {/* NHIF Verification Badge */}
+            {activePatient.insuranceType === InsuranceType.NHIF && currentVisitId && (
+              <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+                <NHIFVerificationBadge visitId={currentVisitId} />
+                {nhifGateResult && !nhifGateResult.allowed && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-xs font-semibold text-red-700">
+                      <i className="fas fa-ban mr-2"></i>
+                      {nhifGateResult.reason}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="p-8 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Billing Summary</p>
@@ -188,8 +268,11 @@ const Billing: React.FC = () => {
                     </div>
                     
                     <div className="flex gap-3">
-                  <button className="px-6 h-12 bg-white/5 border border-white/10 rounded-xl font-semibold text-sm hover:bg-white/10 transition-all flex items-center gap-2">
-                    <i className="fas fa-print"></i> Print
+                  <button 
+                    onClick={handlePrintInvoice}
+                    className="px-6 h-12 bg-white/5 border border-white/10 rounded-xl font-semibold text-sm hover:bg-white/10 transition-all flex items-center gap-2 text-white"
+                  >
+                    <i className="fas fa-file-invoice text-white"></i> {activePatient.insuranceType === InsuranceType.CASH ? 'Invoice' : 'Bill'}
                   </button>
                   <button 
                     onClick={handleProcessPayment}
