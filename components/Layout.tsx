@@ -185,7 +185,7 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
               } ${
                 currentPage === item.id 
                   ? 'text-white shadow-lg font-semibold' 
-                  : 'text-slate-700'
+                  : 'text-white hover:text-white'
               }`}
               style={currentPage === item.id 
                 ? {
@@ -199,23 +199,17 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
               onMouseEnter={(e) => {
                 if (currentPage !== item.id) {
                   e.currentTarget.style.backgroundColor = '#065f46'; // Dark green hover (Emerald-800)
-                  e.currentTarget.style.color = '#ffffff';
                 }
               }}
               onMouseLeave={(e) => {
                 if (currentPage !== item.id) {
                   e.currentTarget.style.backgroundColor = 'transparent';
-                  e.currentTarget.style.color = '#334155'; // slate-700
                 }
               }}
             >
-              <i className={`fas ${item.icon} text-base w-6 flex-shrink-0 text-center ${
-                currentPage === item.id ? 'text-white' : 'text-slate-700'
-              }`} style={currentPage === item.id ? { color: '#ffffff' } : { color: '#334155' }}></i>
+              <i className={`fas ${item.icon} text-base w-6 flex-shrink-0 text-center text-white`}></i>
               {isSidebarOpen && (
-                <span className={`font-medium text-sm whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 ${
-                  currentPage === item.id ? 'text-white' : 'text-slate-700'
-                }`} style={currentPage === item.id ? { color: '#ffffff' } : { color: '#334155' }}>
+                <span className="font-medium text-sm whitespace-nowrap overflow-hidden transition-opacity duration-300 opacity-100 text-white">
                   {item.label}
                 </span>
               )}
@@ -426,27 +420,6 @@ const Layout: React.FC<LayoutProps> = ({ children, activeRole, onRoleChange, cur
                       </div>
                     </div>
                     <div className="py-2">
-                      <button
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          onPageChange('dashboard');
-                        }}
-                        className="w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors flex items-center gap-3 text-sm font-medium text-slate-700"
-                      >
-                        <i className="fas fa-user-circle text-base text-slate-400 w-5"></i>
-                        <span>My Profile</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setIsProfileOpen(false);
-                          onPageChange('dashboard');
-                        }}
-                        className="w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors flex items-center gap-3 text-sm font-medium text-slate-700"
-                      >
-                        <i className="fas fa-cog text-base text-slate-400 w-5"></i>
-                        <span>Settings</span>
-                      </button>
-                      <div className="h-px bg-slate-100 my-1"></div>
                       <button
                         onClick={async () => {
                           setIsProfileOpen(false);

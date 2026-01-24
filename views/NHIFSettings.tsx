@@ -75,6 +75,10 @@ const NHIFSettings: React.FC = () => {
       return;
     }
 
+    if (!confirm('Are you sure you want to save NHIF configuration settings? This will update the API credentials and may affect NHIF verification functionality.')) {
+      return;
+    }
+
     setIsSaving(true);
     try {
       const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -168,7 +172,7 @@ const NHIFSettings: React.FC = () => {
             type="text"
             value={settings.facilityCode}
             onChange={(e) => setSettings({ ...settings, facilityCode: e.target.value })}
-            placeholder="Enter NHIF facility code"
+            placeholder="Enter Facility Code"
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
           />
           <p className="text-xs text-slate-500">Your NHIF-assigned facility code</p>
@@ -180,7 +184,7 @@ const NHIFSettings: React.FC = () => {
             type="text"
             value={settings.facilityName}
             onChange={(e) => setSettings({ ...settings, facilityName: e.target.value })}
-            placeholder="Enter facility name"
+            placeholder="Enter Facility Name"
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
           />
         </div>
@@ -206,7 +210,7 @@ const NHIFSettings: React.FC = () => {
             type="text"
             value={settings.nhifUsername}
             onChange={(e) => setSettings({ ...settings, nhifUsername: e.target.value })}
-            placeholder="Enter NHIF API username"
+            placeholder="Enter API Username"
             className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
           />
           <p className="text-xs text-slate-500">Username provided by NHIF for API access</p>
@@ -221,7 +225,7 @@ const NHIFSettings: React.FC = () => {
               type={showPassword ? 'text' : 'password'}
               value={settings.nhifPassword}
               onChange={(e) => setSettings({ ...settings, nhifPassword: e.target.value })}
-              placeholder="Enter NHIF API password"
+              placeholder="Enter API Password"
               className="w-full px-4 py-3 pr-12 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
             />
             <button
@@ -239,7 +243,16 @@ const NHIFSettings: React.FC = () => {
           <button
             onClick={handleSave}
             disabled={isSaving || isLoading}
-            className="px-6 py-3 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-6 py-3 text-white rounded-xl font-semibold text-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            style={{ backgroundColor: 'var(--brand-primary)' }}
+            onMouseEnter={(e) => {
+              if (!isSaving && !isLoading) {
+                e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+            }}
           >
             {isSaving ? (
               <>

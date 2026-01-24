@@ -8,6 +8,7 @@ import { createBillItem, createPrescription } from '../services/patientService';
 import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
 import { getPatientVisit } from '../services/nhifService';
 import { canDispenseOptical } from '../utils/nhifGating';
+import { logCriticalOperation } from '../services/auditLogService';
 
 const LENS_TYPES = [
   { name: 'Single Vision - Distance', basePrice: 20000, nhifEligible: true, nhifCap: 20000 },
@@ -133,6 +134,16 @@ const OpticalDispensing: React.FC = () => {
       return;
     }
 
+    if (!frameDetails.trim() && framePrice === 0 && pricingSummary.subtotalLens === 0) {
+      showError('Please add frame details or lens configuration');
+      return;
+    }
+
+    const totalAmount = pricingSummary.total;
+    if (!confirm(`Are you sure you want to complete optical dispensing for ${activePatient.name}? Total amount: TZS ${totalAmount.toLocaleString()}. This will finalize the order.`)) {
+      return;
+    }
+
     // Check NHIF service gate
     if (activePatient.insuranceType === InsuranceType.NHIF && currentVisitId) {
       const gateResult = await canDispenseOptical(currentVisitId);
@@ -140,11 +151,6 @@ const OpticalDispensing: React.FC = () => {
         showError(gateResult.reason || 'NHIF verification required before dispensing optical items');
         return;
       }
-    }
-
-    if (!frameDetails.trim() && framePrice === 0 && pricingSummary.subtotalLens === 0) {
-      showError('Please add frame details or lens configuration');
-      return;
     }
 
     setIsSubmitting(true);
@@ -230,6 +236,20 @@ const OpticalDispensing: React.FC = () => {
       });
 
       if (result.success) {
+        // Log optical dispensing
+        await logCriticalOperation(
+          'DISPENSE_OPTICAL',
+          'PATIENT',
+          activePatient.id,
+          {
+            patientName: activePatient.name,
+            totalAmount: pricingSummary.total,
+            frameDetails: frameDetails,
+            lensType: lensType,
+            nextStatus: nextStatus,
+          }
+        );
+
         // Refresh patient data to get updated information
         await refreshPatient(activePatient.id);
         showSuccess(successMessage);
@@ -311,7 +331,7 @@ const OpticalDispensing: React.FC = () => {
               <section className="space-y-6">
                 <div className="flex justify-between items-center"> <h4 className="text-[11px] font-black uppercase tracking-widest text-slate-900 flex items-center gap-3"> <span className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">2</span> Frame Selection </h4> {activePatient.insuranceType === InsuranceType.NHIF && <label className="flex items-center gap-3 bg-emerald-50 px-4 py-2 rounded-2xl border border-emerald-100 cursor-pointer"> <span className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Apply NHIF Frame Allowance</span> <input type="checkbox" checked={claimFrameNHIF} onChange={(e) => setClaimFrameNHIF(e.target.checked)} className="w-5 h-5 rounded-lg text-emerald-600" /> </label>} </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div className="space-y-2"> <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Frame Serial/Description</label> <input type="text" value={frameDetails} onChange={(e) => setFrameDetails(e.target.value)} placeholder="Prada PR 17WS Titanium" className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none focus:border-emerald-500" /> </div>
+                  <div className="space-y-2"> <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Frame Serial/Description</label> <input type="text" value={frameDetails} onChange={(e) => setFrameDetails(e.target.value)} placeholder="Enter Frame Details" className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none focus:border-emerald-500" /> </div>
                   <div className="space-y-4"> <div className="space-y-2"> <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Retail Price (TZS)</label> <input type="number" value={framePrice === 0 ? '' : framePrice} onChange={(e) => setFramePrice(parseFloat(e.target.value) || 0)} className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm outline-none" /> </div> </div>
                 </div>
               </section>

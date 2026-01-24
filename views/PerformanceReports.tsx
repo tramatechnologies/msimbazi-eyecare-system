@@ -281,7 +281,16 @@ const PerformanceReports: React.FC = () => {
               <button
                 onClick={() => setExportMenuOpen(!exportMenuOpen)}
                 disabled={userPerformances.length === 0}
-                className="px-6 py-2.5 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2.5 text-white rounded-xl font-semibold text-sm transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+                onMouseEnter={(e) => {
+                  if (userPerformances.length > 0) {
+                    e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                }}
               >
                 <i className="fas fa-download"></i>
                 Export Report

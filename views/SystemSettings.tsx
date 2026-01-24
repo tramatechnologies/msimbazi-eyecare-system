@@ -35,6 +35,7 @@ const SystemSettings: React.FC = () => {
               type="text"
               value={settings.clinicName}
               onChange={(e) => setSettings({...settings, clinicName: e.target.value})}
+              placeholder="Enter Clinic Name"
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none"
             />
           </div>
@@ -45,6 +46,7 @@ const SystemSettings: React.FC = () => {
                 type="tel"
                 value={settings.clinicPhone}
                 onChange={(e) => setSettings({...settings, clinicPhone: e.target.value})}
+                placeholder="Enter Phone Number"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none"
               />
             </div>
@@ -54,6 +56,7 @@ const SystemSettings: React.FC = () => {
                 type="email"
                 value={settings.clinicEmail}
                 onChange={(e) => setSettings({...settings, clinicEmail: e.target.value})}
+                placeholder="Enter Email Address"
                 className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none"
               />
             </div>
@@ -63,6 +66,7 @@ const SystemSettings: React.FC = () => {
             <textarea
               value={settings.clinicAddress}
               onChange={(e) => setSettings({...settings, clinicAddress: e.target.value})}
+              placeholder="Enter Clinic Address"
               rows={3}
               className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none"
             />
@@ -113,7 +117,16 @@ const SystemSettings: React.FC = () => {
         <button className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-semibold text-sm hover:bg-slate-200 transition-all">
           Cancel
         </button>
-        <button className="px-6 py-3 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all">
+        <button 
+          className="px-6 py-3 text-white rounded-xl font-semibold text-sm transition-all"
+          style={{ backgroundColor: 'var(--brand-primary)' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+          }}
+        >
           Save Changes
         </button>
       </div>

@@ -72,13 +72,27 @@ export const formatDate = (dateString: string): string => {
 
 /**
  * Formats time for display (e.g., "09:30 AM")
+ * Accepts both time strings (HH:MM) and ISO datetime strings
  */
 export const formatTime = (timeString: string): string => {
   if (!timeString) return '';
-  const [hours, minutes] = timeString.split(':');
-  const hour = parseInt(hours);
-  const ampm = hour >= 12 ? 'PM' : 'AM';
-  const displayHour = hour % 12 || 12;
+  
+  let hours: number, minutes: string;
+  
+  // Check if it's an ISO datetime string
+  if (timeString.includes('T') || timeString.includes(' ')) {
+    const date = new Date(timeString);
+    hours = date.getHours();
+    minutes = String(date.getMinutes()).padStart(2, '0');
+  } else {
+    // Assume it's a time string (HH:MM)
+    const [h, m] = timeString.split(':');
+    hours = parseInt(h);
+    minutes = m || '00';
+  }
+  
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  const displayHour = hours % 12 || 12;
   return `${displayHour}:${minutes} ${ampm}`;
 };
 

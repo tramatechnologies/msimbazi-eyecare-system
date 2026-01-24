@@ -87,7 +87,7 @@ const Login: React.FC = () => {
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@msimbazi.com"
+                  placeholder="Enter Email Address"
                   className={`w-full pl-12 pr-4 py-3 bg-slate-50 border rounded-xl focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary outline-none transition-all font-medium text-sm text-slate-700 placeholder:text-slate-400 ${errors.email ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-slate-300'}`}
                 />
                 {errors.email && <p className="text-xs text-red-600 ml-1 mt-1 font-medium">{errors.email}</p>}
@@ -103,7 +103,7 @@ const Login: React.FC = () => {
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="Enter Password"
                   className={`w-full pl-12 pr-12 py-3 bg-slate-50 border rounded-xl focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary outline-none transition-all font-medium text-sm text-slate-700 placeholder:text-slate-400 ${errors.password ? 'border-red-300 bg-red-50' : 'border-slate-200 hover:border-slate-300'}`}
                 />
                 {errors.password && <p className="text-xs text-red-600 ml-1 mt-1 font-medium">{errors.password}</p>}

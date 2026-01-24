@@ -274,18 +274,41 @@ export const checkPermission = async (userId, requiredPermission) => {
 /**
  * Log authentication action
  */
-export const logAuthAction = async (userId, action, ipAddress, status = 'SUCCESS') => {
+export const logAuthAction = async (userId, action, ipAddress, status = 'SUCCESS', metadata = {}) => {
   try {
     const { error } = await supabase.from('audit_logs').insert({
       user_id: userId,
       action: `AUTH_${action}`,
       ip_address: ipAddress,
       status,
+      metadata: metadata,
       timestamp: new Date().toISOString(),
     });
 
     if (error) throw error;
   } catch (error) {
     console.error('Error logging auth action:', error);
+  }
+};
+
+/**
+ * Log critical operation
+ */
+export const logCriticalOperation = async (userId, action, entityType, entityId, ipAddress, metadata = {}) => {
+  try {
+    const { error } = await supabase.from('audit_logs').insert({
+      user_id: userId,
+      action: action,
+      entity_type: entityType,
+      entity_id: entityId,
+      ip_address: ipAddress,
+      status: 'SUCCESS',
+      metadata: metadata,
+      timestamp: new Date().toISOString(),
+    });
+
+    if (error) throw error;
+  } catch (error) {
+    console.error('Error logging critical operation:', error);
   }
 };

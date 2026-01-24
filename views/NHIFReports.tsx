@@ -176,7 +176,16 @@ const NHIFReports: React.FC = () => {
               <button
                 onClick={() => setExportMenuOpen(!exportMenuOpen)}
                 disabled={nhifPatients.length === 0}
-                className="px-6 py-2.5 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-6 py-2.5 text-white rounded-xl font-semibold text-sm transition-all flex items-center gap-2 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+                onMouseEnter={(e) => {
+                  if (nhifPatients.length > 0) {
+                    e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                }}
               >
                 <i className="fas fa-download"></i>
                 Export Report
@@ -244,17 +253,33 @@ const NHIFReports: React.FC = () => {
             color: 'bg-blue-500',
             bgColor: 'bg-blue-50'
           },
-        ].map((stat, i) => (
-          <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all">
-            <div className="flex items-center justify-between mb-4">
-              <div className={`${stat.color} p-3 rounded-xl text-white shadow-md`}>
-                <i className={`fas ${stat.icon} text-lg`}></i>
+        ].map((stat, i) => {
+          // Get background color for icon container
+          const getIconBgColor = (colorClass: string) => {
+            const colorMap: Record<string, string> = {
+              'bg-brand-primary': 'var(--brand-primary)',
+              'bg-emerald-500': '#10b981',
+              'bg-yellow-500': '#eab308',
+              'bg-blue-500': '#3b82f6',
+            };
+            return colorMap[colorClass] || 'var(--brand-primary)';
+          };
+
+          return (
+            <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all">
+              <div className="flex items-center justify-between mb-4">
+                <div 
+                  className="p-3 rounded-xl text-white shadow-md"
+                  style={{ backgroundColor: getIconBgColor(stat.color) }}
+                >
+                  <i className={`fas ${stat.icon} text-lg text-white`} style={{ color: '#ffffff' }}></i>
+                </div>
               </div>
+              <h3 className="text-xl font-black text-slate-900 mb-1">{stat.value}</h3>
+              <p className="text-sm font-semibold text-slate-600">{stat.label}</p>
             </div>
-            <h3 className="text-xl font-black text-slate-900 mb-1">{stat.value}</h3>
-            <p className="text-sm font-semibold text-slate-600">{stat.label}</p>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* NHIF Patients Table */}

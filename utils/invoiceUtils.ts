@@ -91,7 +91,8 @@ export const generateInvoicePDF = async (patient: Patient): Promise<void> => {
       },
     });
 
-    yPosition = (doc as any).lastAutoTable.finalY + 10;
+    const finalY = (doc as any).lastAutoTable?.finalY || yPosition + 20;
+    yPosition = finalY + 10;
   }
 
   // Totals Section
@@ -239,7 +240,8 @@ export const generateReceiptPDF = async (patient: Patient, paymentMethod: string
       },
     });
 
-    yPosition = (doc as any).lastAutoTable.finalY + 10;
+    const finalY = (doc as any).lastAutoTable?.finalY || yPosition + 20;
+    yPosition = finalY + 10;
   }
 
   // Payment Summary

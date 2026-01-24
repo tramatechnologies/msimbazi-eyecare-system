@@ -130,6 +130,14 @@ const UserManagement: React.FC = () => {
   };
 
   const handleRoleChange = async (userId: string, newRole: UserRole) => {
+    const user = users.find(u => u.id === userId);
+    const currentRole = user?.role || '';
+    const roleDisplayName = newRole === UserRole.ADMIN ? 'Super Admin' : newRole.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+    
+    if (!confirm(`Are you sure you want to change the role for ${user?.name || user?.email} from ${currentRole} to ${roleDisplayName}? This will immediately update their permissions.`)) {
+      return;
+    }
+
     setIsLoading(true);
     const result = await updateUserRole(userId, newRole);
     if (result.success) {
@@ -333,7 +341,7 @@ const UserManagement: React.FC = () => {
                   className={`w-full px-4 py-3 bg-slate-50 border rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none ${
                     formErrors.name ? 'border-red-300 bg-red-50' : 'border-slate-200'
                   }`}
-                  placeholder="John Doe"
+                  placeholder="Enter Full Name"
                 />
                 {formErrors.name && <p className="text-xs text-red-600 mt-1">{formErrors.name}</p>}
               </div>
@@ -347,7 +355,7 @@ const UserManagement: React.FC = () => {
                   className={`w-full px-4 py-3 bg-slate-50 border rounded-xl text-sm focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none ${
                     formErrors.email ? 'border-red-300 bg-red-50' : 'border-slate-200'
                   }`}
-                  placeholder="user@msimbazi.com"
+                  placeholder="Enter Email Address"
                 />
                 {formErrors.email && <p className="text-xs text-red-600 mt-1">{formErrors.email}</p>}
               </div>
@@ -584,7 +592,7 @@ const UserManagement: React.FC = () => {
         }}
         aria-label="Add New User"
       >
-        <i className="fas fa-user-plus text-xl"></i>
+        <i className="fas fa-user-plus text-xl text-white"></i>
       </button>
     </div>
   );

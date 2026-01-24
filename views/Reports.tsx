@@ -255,14 +255,14 @@ const Reports: React.FC = () => {
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
-            <h1 className="text-base font-bold text-slate-900 tracking-tight">Reports & Analytics</h1>
+            <h1 className="text-base font-normal text-slate-900 tracking-tight">Reports & Analytics</h1>
             <p className="text-sm text-slate-500 font-medium mt-1">Comprehensive system performance and analytics</p>
           </div>
           <div className="flex items-center gap-3 w-full sm:w-auto">
             <select
               value={selectedPeriod}
               onChange={(e) => setSelectedPeriod(e.target.value as ReportPeriod)}
-              className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
+              className="px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-normal focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
             >
               <option value="today">Today</option>
               <option value="week">Last 7 Days</option>
@@ -272,7 +272,14 @@ const Reports: React.FC = () => {
             <div className="relative" ref={exportMenuRef}>
               <button
                 onClick={() => setExportMenuOpen(!exportMenuOpen)}
-                className="px-6 py-2.5 bg-brand-primary text-white rounded-xl font-semibold text-sm hover:bg-brand-primary-dark transition-all flex items-center gap-2 whitespace-nowrap"
+                className="px-6 py-2.5 text-white rounded-xl font-normal text-sm transition-all flex items-center gap-2 whitespace-nowrap"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                }}
               >
                 <i className="fas fa-download"></i>
                 Export Report
@@ -283,14 +290,14 @@ const Reports: React.FC = () => {
                 <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200 shadow-lg z-50 overflow-hidden">
                   <button
                     onClick={handleExportPDF}
-                    className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
+                    className="w-full px-4 py-3 text-left text-sm font-normal text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
                   >
                     <i className="fas fa-file-pdf text-red-600"></i>
                     Export as PDF
                   </button>
                   <button
                     onClick={handleExportExcel}
-                    className="w-full px-4 py-3 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
+                    className="w-full px-4 py-3 text-left text-sm font-normal text-slate-700 hover:bg-slate-50 transition-all flex items-center gap-3 border-b border-slate-100"
                   >
                     <i className="fas fa-file-excel text-green-600"></i>
                     Export as Excel
@@ -344,25 +351,41 @@ const Reports: React.FC = () => {
             bgColor: 'bg-purple-50',
             change: 'Per patient'
           },
-        ].map((stat, i) => (
-          <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all">
-            <div className="flex items-center justify-between mb-4">
-              <div className={`${stat.color} p-3 rounded-xl text-white shadow-md`}>
-                <i className={`fas ${stat.icon} text-lg`}></i>
+        ].map((stat, i) => {
+          // Get background color for icon container
+          const getIconBgColor = (colorClass: string) => {
+            const colorMap: Record<string, string> = {
+              'bg-brand-primary': 'var(--brand-primary)',
+              'bg-emerald-500': '#10b981',
+              'bg-blue-500': '#3b82f6',
+              'bg-purple-500': '#a855f7',
+            };
+            return colorMap[colorClass] || 'var(--brand-primary)';
+          };
+
+          return (
+            <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-lg transition-all">
+              <div className="flex items-center justify-between mb-4">
+                <div 
+                  className="p-3 rounded-xl text-white shadow-md"
+                  style={{ backgroundColor: getIconBgColor(stat.color) }}
+                >
+                  <i className={`fas ${stat.icon} text-lg text-white`} style={{ color: '#ffffff' }}></i>
+                </div>
+                <span className="text-xs font-normal text-slate-500">{stat.change}</span>
               </div>
-              <span className="text-xs font-semibold text-slate-500">{stat.change}</span>
+              <h3 className="text-xl font-normal text-slate-900 mb-1">{stat.value}</h3>
+              <p className="text-sm font-normal text-slate-600">{stat.label}</p>
             </div>
-            <h3 className="text-xl font-black text-slate-900 mb-1">{stat.value}</h3>
-            <p className="text-sm font-semibold text-slate-600">{stat.label}</p>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Detailed Statistics Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Patient Statistics */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <h2 className="text-sm font-bold text-slate-900 mb-6 flex items-center gap-2">
+          <h2 className="text-sm font-normal text-slate-900 mb-6 flex items-center gap-2">
             <i className="fas fa-users text-brand-primary"></i>
             Patient Statistics
           </h2>
@@ -375,8 +398,8 @@ const Reports: React.FC = () => {
               { label: 'Cash Patients', value: statistics.cashPatients, color: 'text-slate-600' },
             ].map((stat, i) => (
               <div key={i} className="flex justify-between items-center py-3 border-b border-slate-100 last:border-0">
-                <span className="text-sm font-semibold text-slate-700">{stat.label}</span>
-                <span className={`text-base font-black ${stat.color}`}>{stat.value}</span>
+                <span className="text-sm font-normal text-slate-700">{stat.label}</span>
+                <span className={`text-base font-normal ${stat.color}`}>{stat.value}</span>
               </div>
             ))}
           </div>
@@ -384,7 +407,7 @@ const Reports: React.FC = () => {
 
         {/* Department Activity */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <h2 className="text-sm font-bold text-slate-900 mb-6 flex items-center gap-2">
+          <h2 className="text-sm font-normal text-slate-900 mb-6 flex items-center gap-2">
             <i className="fas fa-building text-brand-primary"></i>
             Department Activity
           </h2>
@@ -398,12 +421,12 @@ const Reports: React.FC = () => {
               <div key={i} className="flex justify-between items-center py-3 border-b border-slate-100 last:border-0">
                 <div className="flex items-center gap-3">
                   <div className={`${dept.color} w-3 h-3 rounded-full`}></div>
-                  <span className="text-sm font-semibold text-slate-700">{dept.label}</span>
+                  <span className="text-sm font-normal text-slate-700">{dept.label}</span>
                 </div>
                 <div className="text-right">
-                  <div className="text-base font-black text-slate-900">{dept.value} patients</div>
+                  <div className="text-base font-normal text-slate-900">{dept.value} patients</div>
                   {dept.revenue > 0 && (
-                    <div className="text-xs font-semibold text-slate-500">TZS {dept.revenue.toLocaleString()}</div>
+                    <div className="text-xs font-normal text-slate-500">TZS {dept.revenue.toLocaleString()}</div>
                   )}
                 </div>
               </div>
@@ -414,7 +437,7 @@ const Reports: React.FC = () => {
 
       {/* Revenue Breakdown */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-sm font-bold text-slate-900 mb-6 flex items-center gap-2">
+        <h2 className="text-sm font-normal text-slate-900 mb-6 flex items-center gap-2">
           <i className="fas fa-chart-pie text-brand-primary"></i>
           Revenue Breakdown by Category
         </h2>
@@ -447,10 +470,10 @@ const Reports: React.FC = () => {
                 <div className={`${category.color} p-3 rounded-xl text-white`}>
                   <i className={`fas ${category.icon} text-lg`}></i>
                 </div>
-                <span className="text-xs font-black text-slate-500">{category.percentage}%</span>
+                <span className="text-xs font-normal text-slate-500">{category.percentage}%</span>
               </div>
-              <h3 className="text-lg font-black text-slate-900 mb-1">TZS {category.amount.toLocaleString()}</h3>
-              <p className="text-sm font-semibold text-slate-600">{category.label}</p>
+              <h3 className="text-lg font-normal text-slate-900 mb-1">TZS {category.amount.toLocaleString()}</h3>
+              <p className="text-sm font-normal text-slate-600">{category.label}</p>
             </div>
           ))}
         </div>
@@ -458,49 +481,49 @@ const Reports: React.FC = () => {
 
       {/* Insurance Coverage Analysis */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-sm font-bold text-slate-900 mb-6 flex items-center gap-2">
+        <h2 className="text-sm font-normal text-slate-900 mb-6 flex items-center gap-2">
           <i className="fas fa-shield-alt text-brand-primary"></i>
           Insurance Coverage Analysis
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="p-6 bg-brand-primary-50 rounded-xl border border-brand-primary-100">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-bold text-brand-primary-dark">NHIF Coverage</span>
+              <span className="text-sm font-normal text-brand-primary-dark">NHIF Coverage</span>
               <i className="fas fa-shield-check text-brand-primary text-lg"></i>
             </div>
-            <div className="text-2xl font-black text-brand-primary-dark mb-1">
+            <div className="text-lg font-bold text-brand-primary-dark mb-1">
               TZS {filteredPatients
                 .filter(p => p.insuranceType === InsuranceType.NHIF)
                 .reduce((sum, p) => sum + calculateInsuranceCoverage(p), 0)
                 .toLocaleString()}
             </div>
-            <p className="text-xs font-semibold text-slate-600">{statistics.nhifPatients} patients</p>
+            <p className="text-xs font-normal text-slate-600">{statistics.nhifPatients} patients</p>
           </div>
           <div className="p-6 bg-purple-50 rounded-xl border border-purple-100">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-bold text-purple-700">Private Insurance</span>
+              <span className="text-sm font-normal text-purple-700">Private Insurance</span>
               <i className="fas fa-building text-purple-600 text-lg"></i>
             </div>
-            <div className="text-2xl font-black text-purple-700 mb-1">
+            <div className="text-lg font-bold text-purple-700 mb-1">
               TZS {filteredPatients
                 .filter(p => p.insuranceType === InsuranceType.PRIVATE)
                 .reduce((sum, p) => sum + calculateInsuranceCoverage(p), 0)
                 .toLocaleString()}
             </div>
-            <p className="text-xs font-semibold text-slate-600">{statistics.privatePatients} patients</p>
+            <p className="text-xs font-normal text-slate-600">{statistics.privatePatients} patients</p>
           </div>
           <div className="p-6 bg-slate-50 rounded-xl border border-slate-200">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-sm font-bold text-slate-700">Out of Pocket</span>
+              <span className="text-sm font-normal text-slate-700">Out of Pocket</span>
               <i className="fas fa-money-bill text-slate-600 text-lg"></i>
             </div>
-            <div className="text-2xl font-black text-slate-900 mb-1">
+            <div className="text-lg font-bold text-slate-900 mb-1">
               TZS {filteredPatients
                 .filter(p => p.insuranceType === InsuranceType.CASH)
                 .reduce((sum, p) => sum + calculateBillTotal(p.billItems), 0)
                 .toLocaleString()}
             </div>
-            <p className="text-xs font-semibold text-slate-600">{statistics.cashPatients} patients</p>
+            <p className="text-xs font-normal text-slate-600">{statistics.cashPatients} patients</p>
           </div>
         </div>
       </div>
@@ -509,14 +532,14 @@ const Reports: React.FC = () => {
       <div className="bg-gradient-to-r from-brand-primary to-brand-secondary rounded-2xl p-6 text-white">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-white/80 uppercase tracking-widest mb-2">Report Period</h3>
-            <p className="text-lg font-black">
+            <h3 className="text-sm font-normal text-white/80 uppercase tracking-widest mb-2">Report Period</h3>
+            <p className="text-lg font-normal">
               {formatDate(dateRange.startDate.toISOString())} - {formatDate(dateRange.endDate.toISOString())}
             </p>
           </div>
           <div className="text-right">
-            <p className="text-sm font-bold text-white/80 uppercase tracking-widest mb-2">Total Patients</p>
-            <p className="text-3xl font-black">{statistics.totalPatients}</p>
+            <p className="text-sm font-normal text-white/80 uppercase tracking-widest mb-2">Total Patients</p>
+            <p className="text-3xl font-normal">{statistics.totalPatients}</p>
           </div>
         </div>
       </div>

@@ -9,15 +9,7 @@ import { createBillItem } from '../services/patientService';
 import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
 import { getPatientVisit } from '../services/nhifService';
 import { canDispenseMedications } from '../utils/nhifGating';
-
-const MOCK_MEDICATIONS: Medication[] = [
-  { id: 'm1', name: 'Atropine Sulfate 1%', dosage: '10ml', form: 'Drops', price: 15000, stock: 45, isCoveredByNHIF: true, isCoveredByPrivate: true },
-  { id: 'm2', name: 'Timolol Maleate 0.5%', dosage: '5ml', form: 'Drops', price: 12000, stock: 30, isCoveredByNHIF: true, isCoveredByPrivate: true },
-  { id: 'm3', name: 'Ofloxacin 0.3%', dosage: '5ml', form: 'Drops', price: 18000, stock: 12, isCoveredByNHIF: false, isCoveredByPrivate: true },
-  { id: 'm4', name: 'Prednisolone Acetate 1%', dosage: '5ml', form: 'Drops', price: 22000, stock: 8, isCoveredByNHIF: true, isCoveredByPrivate: true },
-  { id: 'm5', name: 'Ciprofloxacin', dosage: '500mg', form: 'Tablet', price: 8000, stock: 100, isCoveredByNHIF: true, isCoveredByPrivate: true },
-  { id: 'm6', name: 'Eye Lubricant (Artificial Tears)', dosage: '15ml', form: 'Drops', price: 25000, stock: 50, isCoveredByNHIF: false, isCoveredByPrivate: false },
-];
+import { logCriticalOperation } from '../services/auditLogService';
 
 const Pharmacy: React.FC = () => {
   const { patients, updatePatient, refreshPatient, useApi } = usePatients();
@@ -26,6 +18,7 @@ const Pharmacy: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [dispensingItems, setDispensingItems] = useState<{ med: Medication; qty: number }[]>([]);
   const [isDispensing, setIsDispensing] = useState(false);
+  const [medications, setMedications] = useState<Medication[]>([]);
 
   const activePatient = patients.find(p => p.id === selectedId);
   const pharmacyQueue = patients.filter(p => 
@@ -33,6 +26,21 @@ const Pharmacy: React.FC = () => {
     p.status === PatientStatus.IN_PHARMACY || 
     (p.prescription?.medications && p.prescription.medications.length > 0)
   );
+
+  // Load medications from API
+  useEffect(() => {
+    const loadMedications = async () => {
+      try {
+        const { getMedications } = await import('../services/medicationService');
+        const meds = await getMedications({ search: searchTerm });
+        setMedications(meds);
+      } catch (error) {
+        console.error('Failed to load medications:', error);
+        setMedications([]);
+      }
+    };
+    loadMedications();
+  }, [searchTerm]);
 
   // Refresh patient data when selected
   useEffect(() => {
@@ -43,7 +51,7 @@ const Pharmacy: React.FC = () => {
     }
   }, [selectedId, refreshPatient]);
 
-  const filteredMeds = MOCK_MEDICATIONS.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredMeds = medications.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const handleAddToDispense = (med: Medication) => {
     if (dispensingItems.find(i => i.med.id === med.id)) return;
@@ -57,6 +65,11 @@ const Pharmacy: React.FC = () => {
   const handleCompleteDispensing = async () => {
     if (!activePatient || dispensingItems.length === 0) {
       showError('Please add medications to dispense');
+      return;
+    }
+
+    const totalAmount = dispensingItems.reduce((sum, item) => sum + (item.med.price * item.qty), 0);
+    if (!confirm(`Are you sure you want to complete dispensing for ${activePatient.name}? Total amount: TZS ${totalAmount.toLocaleString()}. This will route the patient to billing.`)) {
       return;
     }
 
@@ -99,6 +112,18 @@ const Pharmacy: React.FC = () => {
       });
 
       if (result.success) {
+        // Log medication dispensing
+        await logCriticalOperation(
+          'DISPENSE_MEDICATIONS',
+          'PATIENT',
+          activePatient.id,
+          {
+            patientName: activePatient.name,
+            itemCount: dispensingItems.length,
+            totalAmount: totalAmount,
+          }
+        );
+
         // Refresh patient data to get updated bill items
         await refreshPatient(activePatient.id);
         showSuccess(`Medications dispensed successfully. ${activePatient.name} routed to billing.`);
@@ -180,7 +205,7 @@ const Pharmacy: React.FC = () => {
                       </div>
                       <div className="text-right flex items-center gap-4">
                         <div className="mr-2"> <p className="text-sm font-black text-slate-900">TZS {med.price.toLocaleString()}</p> <p className={`text-[10px] font-bold ${med.stock < 10 ? 'text-red-500' : 'text-slate-400'}`}>Qty: {med.stock}</p> </div>
-                        <button onClick={() => handleAddToDispense(med)} disabled={med.stock <= 0} className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-2xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center"> <i className="fas fa-plus text-emerald-600 group-hover:text-white"></i> </button>
+                        <button onClick={() => handleAddToDispense(med)} disabled={med.stock <= 0} className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-2xl hover:bg-emerald-600 hover:text-white transition-all flex items-center justify-center group"> <i className="fas fa-plus text-emerald-600 group-hover:text-white"></i> </button>
                       </div>
                     </div>
                   );
@@ -201,7 +226,16 @@ const Pharmacy: React.FC = () => {
                       <button onClick={() => updateQty(item.med.id, -1)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"> <i className="fas fa-minus text-[10px] text-white"></i> </button>
                       <span className="font-black w-4 text-center text-white">{item.qty}</span>
                       <button onClick={() => updateQty(item.med.id, 1)} className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center"> <i className="fas fa-plus text-[10px] text-white"></i> </button>
-                      <button onClick={() => setDispensingItems(dispensingItems.filter(i => i.med.id !== item.med.id))} className="ml-2 text-red-400"> <i className="fas fa-trash-alt text-[10px] text-red-400"></i> </button>
+                      <button 
+                        onClick={() => {
+                          if (confirm(`Are you sure you want to remove ${item.med.name} from the dispensing list?`)) {
+                            setDispensingItems(dispensingItems.filter(i => i.med.id !== item.med.id));
+                          }
+                        }} 
+                        className="ml-2 text-red-400"
+                      > 
+                        <i className="fas fa-trash-alt text-[10px] text-red-400"></i> 
+                      </button>
                     </div>
                   </div>
                 ))}

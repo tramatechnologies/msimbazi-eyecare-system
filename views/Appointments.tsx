@@ -1,10 +1,10 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { usePatients } from '../contexts/PatientContext';
 import { useToast } from '../components/Toast';
 import { useAuth } from '../contexts/AuthContext';
 import { Appointment, AppointmentType, AppointmentPriority, PatientStatus, UserRole, InsuranceType } from '../types';
-import { MOCK_PROVIDERS } from '../constants';
+import { getProviders } from '../services/providerService';
 import { useDebounce } from '../utils/debounce';
 import { UI_TIMING } from '../constants';
 import { formatDate, formatTime } from '../utils/dateTimeUtils';
@@ -22,8 +22,23 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [viewMode, setViewMode] = useState<'queue' | 'appointments'>('queue');
   const debouncedSearchTerm = useDebounce(searchTerm, UI_TIMING.DEBOUNCE_DELAY);
+  const [providers, setProviders] = useState<any[]>([]);
   
   const isOptometrist = activeRole === UserRole.OPTOMETRIST;
+
+  // Load providers
+  useEffect(() => {
+    const loadProviders = async () => {
+      try {
+        const providersList = await getProviders();
+        setProviders(providersList);
+      } catch (error) {
+        console.error('Failed to load providers:', error);
+        setProviders([]);
+      }
+    };
+    loadProviders();
+  }, []);
 
   // Get clinical queue for optometrists (patients waiting or in clinical)
   const clinicalQueue = useMemo(() => {
@@ -94,7 +109,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
         apt.patientName.toLowerCase().includes(search) ||
         apt.patientPhone.includes(search) ||
         apt.patientId.toLowerCase().includes(search) ||
-        (apt.assignedDoctorId && MOCK_PROVIDERS.find(p => p.id === apt.assignedDoctorId)?.name.toLowerCase().includes(search))
+        (apt.assignedDoctorId && providers.find(p => p.id === apt.assignedDoctorId)?.name.toLowerCase().includes(search))
       );
     }
 
@@ -112,7 +127,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ onOpenEMR }) => {
 
   const getDoctorName = (doctorId?: string) => {
     if (!doctorId) return 'Auto Assigned';
-    const doctor = MOCK_PROVIDERS.find(p => p.id === doctorId);
+    const doctor = providers.find(p => p.id === doctorId);
     return doctor ? doctor.name : 'Unknown';
   };
 

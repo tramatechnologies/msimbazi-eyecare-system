@@ -8,7 +8,8 @@ import * as patientService from '../services/patientService';
 import { sanitizeInput, validatePhone, validateDateOfBirth, validateName } from '../utils/validation';
 import { generateAuthNumber, generatePatientId } from '../utils/idGenerator';
 import { INSURANCE_PROVIDERS, HOSPITAL_PRICING } from '../constants';
-import { MOCK_PROVIDERS } from '../constants';
+import { getProvidersForScheduling } from '../services/providerService';
+import { syncProvidersFromUsers } from '../services/userService';
 import { getCurrentDate, getNextAvailableTime, formatDate, formatTime } from '../utils/dateTimeUtils';
 import { verifyNHIF, createVisit, getPatientVisit } from '../services/nhifService';
 
@@ -76,11 +77,25 @@ const Registration: React.FC = () => {
     ).slice(0, 5);
   }, [patients, searchTerm]);
 
-  // Get optometrists for assignment
-  const availableDoctors = useMemo(() => 
-    MOCK_PROVIDERS.filter(p => p.status === 'AVAILABLE' || p.status === 'ON_BREAK'),
-    []
-  );
+  // Get doctors for scheduling (all OPTOMETRIST + OPHTHALMOLOGIST, any status)
+  const [availableDoctors, setAvailableDoctors] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadDoctors = async () => {
+      try {
+        let doctors = await getProvidersForScheduling();
+        if (doctors.length === 0) {
+          await syncProvidersFromUsers();
+          doctors = await getProvidersForScheduling();
+        }
+        setAvailableDoctors(doctors);
+      } catch (error) {
+        console.error('Failed to load doctors:', error);
+        setAvailableDoctors([]);
+      }
+    };
+    loadDoctors();
+  }, []);
 
   // Calculate age from date of birth
   const calculatedAge = useMemo(() => {
@@ -375,8 +390,13 @@ const Registration: React.FC = () => {
         appointment: updatedAppointment,
       };
 
-      // Update insurance info if changed
-      if (formData.patientCategory === 'INSURANCE') {
+      // Always sync insurance from current category (fix: cash patients were left as NHIF)
+      if (formData.patientCategory === 'CASH') {
+        updateData.insuranceType = InsuranceType.CASH;
+        updateData.insuranceProvider = null as unknown as InsuranceProvider; // explicit null so API clears DB
+        updateData.insuranceNumber = '';
+        updateData.nhifAuthNumber = '';
+      } else {
         updateData.insuranceType = formData.insuranceProvider === InsuranceProvider.NHIF 
           ? InsuranceType.NHIF 
           : InsuranceType.PRIVATE;
@@ -581,30 +601,30 @@ const Registration: React.FC = () => {
     }
   };
 
-  // Select returning patient
+  // Select returning patient — preserve user's category (CASH vs INSURANCE) so "register as cash" works
   const handleSelectReturningPatient = (patientId: string) => {
     const patient = patients.find(p => p.id === patientId);
     if (patient) {
-      setFormData({
+      const keepCategory = formData.patientCategory || (patient.insuranceType === InsuranceType.CASH ? 'CASH' : 'INSURANCE');
+      const base = {
         ...formData,
         name: patient.name,
         phone: patient.phone,
         dob: patient.dob,
         address: patient.address || '',
         gender: patient.gender,
-        patientCategory: patient.insuranceType === InsuranceType.CASH ? 'CASH' : 'INSURANCE',
-        insuranceProvider: patient.insuranceProvider as InsuranceProvider || '' as InsuranceProvider | '',
-        insuranceNumber: patient.insuranceNumber || '',
-      });
+        patientCategory: keepCategory,
+        insuranceProvider: keepCategory === 'INSURANCE' && patient.insuranceType !== InsuranceType.CASH
+          ? (patient.insuranceProvider as InsuranceProvider) || ('' as InsuranceProvider)
+          : ('' as InsuranceProvider),
+        insuranceNumber: keepCategory === 'INSURANCE' ? (patient.insuranceNumber || '') : '',
+      };
+      setFormData(keepCategory === 'CASH'
+        ? { ...base, appointmentDate: getCurrentDate(), appointmentTime: getNextAvailableTime() }
+        : base);
       setSelectedPatientId(patientId);
       setSearchTerm('');
-      
-      // Continue with appointment scheduling for returning patient
-      if (patient.insuranceType === InsuranceType.CASH) {
-        setCurrentStep('appointment');
-      } else {
-        setCurrentStep('insurance');
-      }
+      setCurrentStep(keepCategory === 'CASH' ? 'appointment' : 'insurance');
     }
   };
 
@@ -618,7 +638,7 @@ const Registration: React.FC = () => {
               <h3 className="text-base font-bold tracking-tight">Patient Registration</h3>
               <p className="text-white/80 text-sm font-medium uppercase tracking-wide mt-1">Select Patient Category</p>
             </div>
-            <div className="bg-brand-primary p-3 rounded-xl shadow-md">
+            <div className="p-3 rounded-xl shadow-md" style={{ backgroundColor: 'var(--brand-primary)' }}>
               <i className="fas fa-user-plus text-base text-white"></i>
             </div>
           </div>
@@ -659,10 +679,25 @@ const Registration: React.FC = () => {
               <button
                 onClick={() => handleCategorySelect('CASH')}
                 className="p-8 border-2 border-slate-200 rounded-2xl hover:border-brand-primary hover:bg-brand-primary-50 transition-all text-left group"
+                onMouseEnter={(e) => {
+                  const iconContainer = e.currentTarget.querySelector('.cash-icon-container') as HTMLElement;
+                  const icon = e.currentTarget.querySelector('.cash-icon') as HTMLElement;
+                  if (iconContainer) iconContainer.style.backgroundColor = 'var(--brand-primary)';
+                  if (icon) icon.style.color = '#ffffff';
+                }}
+                onMouseLeave={(e) => {
+                  const iconContainer = e.currentTarget.querySelector('.cash-icon-container') as HTMLElement;
+                  const icon = e.currentTarget.querySelector('.cash-icon') as HTMLElement;
+                  if (iconContainer) iconContainer.style.backgroundColor = '#d1fae5';
+                  if (icon) icon.style.color = 'var(--brand-primary)';
+                }}
               >
                 <div className="flex items-center justify-between mb-4">
-                  <div className="w-16 h-16 bg-brand-primary-100 rounded-xl flex items-center justify-center group-hover:bg-brand-primary transition-colors">
-                    <i className="fas fa-money-bill-wave text-2xl text-brand-primary group-hover:text-white transition-colors"></i>
+                  <div 
+                    className="cash-icon-container w-16 h-16 rounded-xl flex items-center justify-center transition-colors"
+                    style={{ backgroundColor: '#d1fae5' }}
+                  >
+                    <i className="cash-icon fas fa-money-bill-wave text-2xl transition-colors" style={{ color: 'var(--brand-primary)' }}></i>
                   </div>
                 </div>
                 <h4 className="text-base font-bold text-slate-900 mb-2">Cash Payment</h4>
@@ -717,7 +752,7 @@ const Registration: React.FC = () => {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g. John Doe"
+                  placeholder="Enter Full Name"
                   maxLength={100}
                   className={`w-full h-12 px-4 bg-slate-50 border rounded-xl focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all text-sm font-normal ${errors.name ? 'border-red-300' : 'border-slate-200'}`}
                 />
@@ -734,7 +769,7 @@ const Registration: React.FC = () => {
                     const sanitized = sanitizeInput(e.target.value).replace(/\D/g, '').substring(0, 10);
                     setFormData({ ...formData, phone: sanitized });
                   }}
-                  placeholder="07XX XXX XXX"
+                  placeholder="Enter Phone Number"
                   maxLength={10}
                   className={`w-full h-12 px-4 bg-slate-50 border rounded-xl focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all text-sm font-normal ${errors.phone ? 'border-red-300' : 'border-slate-200'}`}
                 />
@@ -779,7 +814,7 @@ const Registration: React.FC = () => {
                   type="text"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  placeholder="Street address, City, Region"
+                  placeholder="Enter Address"
                   maxLength={200}
                   className="w-full h-12 px-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all text-sm font-normal"
                 />
@@ -796,7 +831,14 @@ const Registration: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-8 h-12 bg-brand-primary text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                className="px-8 h-12 text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                }}
               >
                 Continue
               </button>
@@ -868,7 +910,7 @@ const Registration: React.FC = () => {
                       setIsVerified(false);
                       setVerificationError('');
                     }}
-                    placeholder={formData.insuranceProvider === InsuranceProvider.NHIF ? 'e.g. 10-12345678' : 'Enter membership number'}
+                    placeholder={formData.insuranceProvider === InsuranceProvider.NHIF ? 'Enter NHIF Card Number' : 'Enter Membership Number'}
                     maxLength={30}
                     className={`w-full h-12 px-4 bg-white border rounded-xl focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all text-sm font-normal ${errors.insuranceNumber || verificationError ? 'border-red-300' : 'border-slate-200'}`}
                   />
@@ -919,7 +961,7 @@ const Registration: React.FC = () => {
                             setIsVerified(false);
                             setVerificationError('');
                           }}
-                          placeholder="Enter referral number"
+                          placeholder="Enter Referral Number"
                           maxLength={50}
                           className="w-full h-12 px-4 bg-white border border-slate-200 rounded-xl text-sm font-normal focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
                         />
@@ -948,11 +990,22 @@ const Registration: React.FC = () => {
                         type="button"
                         onClick={handleVerifyNHIF}
                         disabled={isVerifying || isVerified || !formData.insuranceNumber.trim()}
-                        className={`px-6 h-12 rounded-xl font-semibold text-sm transition-all ${
-                          isVerified
-                            ? 'bg-emerald-500 text-white cursor-not-allowed'
-                            : 'bg-brand-primary text-white hover:bg-brand-primary-dark shadow-md disabled:opacity-50 disabled:cursor-not-allowed'
+                        className={`px-6 h-12 rounded-xl font-semibold text-sm transition-all text-white shadow-md disabled:opacity-50 disabled:cursor-not-allowed ${
+                          isVerified ? 'cursor-not-allowed' : ''
                         }`}
+                        style={{
+                          backgroundColor: isVerified ? '#10b981' : 'var(--brand-primary)'
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!isVerified && !isVerifying) {
+                            e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          if (!isVerified && !isVerifying) {
+                            e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                          }
+                        }}
                       >
                         {isVerifying ? (
                           <>
@@ -1078,7 +1131,14 @@ const Registration: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-8 h-12 bg-brand-primary text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                className="px-8 h-12 text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                }}
               >
                 Continue
               </button>
@@ -1212,7 +1272,7 @@ const Registration: React.FC = () => {
                   <option value="">-- Auto Assign --</option>
                   {availableDoctors.map(doctor => (
                     <option key={doctor.id} value={doctor.id}>
-                      {doctor.name} - {doctor.specialization}
+                      {doctor.name} – {doctor.specialization || doctor.role}
                     </option>
                   ))}
                 </select>
@@ -1229,7 +1289,14 @@ const Registration: React.FC = () => {
               </button>
               <button
                 type="submit"
-                className="px-8 h-12 bg-brand-primary text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                className="px-8 h-12 text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                style={{ backgroundColor: 'var(--brand-primary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                }}
               >
                 {formData.patientCategory === 'CASH' ? 'Review Billing' : 'Complete Registration'}
               </button>
@@ -1390,7 +1457,14 @@ const Registration: React.FC = () => {
                     setSearchTerm('');
                     setSelectedPatientId(null);
                   }}
-                  className="flex-1 px-6 h-12 bg-brand-primary text-white rounded-xl font-semibold text-sm shadow-md hover:bg-brand-primary-dark transition-all"
+                  className="flex-1 px-6 h-12 text-white rounded-xl font-semibold text-sm shadow-md transition-all"
+                  style={{ backgroundColor: 'var(--brand-primary)' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--brand-primary-dark)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = 'var(--brand-primary)';
+                  }}
                 >
                   Register Another Patient
                 </button>

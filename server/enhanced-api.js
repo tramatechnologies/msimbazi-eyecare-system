@@ -19,6 +19,7 @@ import {
   verifySession,
   checkPermission,
   logAuthAction,
+  logCriticalOperation,
 } from './auth.js';
 import {
   validatePatient,
@@ -465,11 +466,14 @@ app.post('/api/patients', authMiddleware, writeRateLimiter, csrfProtection, role
       return res.status(400).json({ error: error.message });
     }
 
-    // Log action
-    await logAuthAction(
+    // Log critical operation
+    await logCriticalOperation(
       req.user.sub,
       'CREATE_PATIENT',
-      req.ip
+      'PATIENT',
+      newPatient[0].id,
+      req.ip,
+      { patientId: newPatient[0].id, patientNumber, patientName: patientData.name }
     );
 
     res.status(201).json({
@@ -727,7 +731,10 @@ app.post('/api/patients/:id/prescriptions', authMiddleware, roleMiddleware(PATIE
 
     if (error) return res.status(400).json({ error: error.message });
 
-    await logAuthAction(req.user.sub, 'CREATE_PRESCRIPTION', req.ip);
+    await logCriticalOperation(req.user.sub, 'CREATE_PRESCRIPTION', 'PRESCRIPTION', rx[0].id, req.ip, {
+      patientId: patientId,
+      prescriptionId: rx[0].id,
+    });
     res.status(201).json({ success: true, prescription: rx[0], message: 'Prescription created' });
   } catch (err) {
     console.error('Create prescription error:', err);
@@ -840,7 +847,14 @@ app.post('/api/patients/:id/bill-items', authMiddleware, roleMiddleware(PATIENT_
       if (!error && bi && bi[0]) inserted.push(bi[0]);
     }
 
-    await logAuthAction(req.user.sub, 'CREATE_BILL_ITEM', req.ip);
+    // Log each bill item creation
+    for (const item of inserted) {
+      await logCriticalOperation(req.user.sub, 'CREATE_BILL_ITEM', 'BILL_ITEM', item.id, req.ip, {
+        patientId: patientId,
+        amount: item.amount,
+        description: item.description,
+      });
+    }
     res.status(201).json({ success: true, billItems: inserted, message: 'Bill item(s) added' });
   } catch (err) {
     console.error('Create bill item error:', err);
@@ -895,7 +909,10 @@ app.delete('/api/patients/:id', authMiddleware, roleMiddleware(['receptionist', 
       .eq('id', patientId);
 
     if (error) return res.status(400).json({ error: error.message });
-    await logAuthAction(req.user.sub, 'DELETE_PATIENT', req.ip);
+    await logCriticalOperation(req.user.sub, 'DELETE_PATIENT', 'PATIENT', patientId, req.ip, {
+      patientName: existing.name,
+      patientId: patientId,
+    });
     res.json({ success: true, message: 'Patient deleted' });
   } catch (err) {
     console.error('Delete patient error:', err);
@@ -1062,17 +1079,19 @@ app.post('/api/nhif/verify', authMiddleware, writeRateLimiter, csrfProtection, r
 
     if (!verifyResult.success) {
       // Log failed verification attempt
-      await logSecurityEvent({
-        userId: req.user.sub,
-        action: 'NHIF_VERIFY',
-        severity: 'medium',
-        metadata: {
+      await logCriticalOperation(
+        req.user.sub,
+        'NHIF_VERIFY_FAILED',
+        'NHIF_VERIFICATION',
+        visitId,
+        req.ip,
+        {
           visitId,
           cardNo: cardNo.substring(0, 4) + '****', // Partial card number for security
           visitTypeId,
           error: verifyResult.error,
-        },
-      });
+        }
+      );
 
       return res.status(400).json({
         success: false,
@@ -1101,16 +1120,18 @@ app.post('/api/nhif/verify', authMiddleware, writeRateLimiter, csrfProtection, r
     }
 
     // Log successful verification
-    await logSecurityEvent({
-      userId: req.user.sub,
-      action: 'NHIF_VERIFY',
-      severity: 'info',
-      metadata: {
+    await logCriticalOperation(
+      req.user.sub,
+      'NHIF_VERIFY',
+      'NHIF_VERIFICATION',
+      storeResult.verificationId || visitId,
+      req.ip,
+      {
         visitId,
         authorizationStatus: verifyResult.authorizationStatus,
         authorizationNo: verifyResult.authorizationNo,
-      },
-    });
+      }
+    );
 
     res.json({
       success: true,
@@ -1322,15 +1343,20 @@ app.post('/api/nhif/config', authMiddleware, writeRateLimiter, csrfProtection, r
       return res.status(400).json({ error: error.message || 'Failed to save NHIF config' });
     }
 
-    // Log security event
-    await logSecurityEvent({
-      userId: req.user.sub,
-      action: 'NHIF_CONFIG_UPDATE',
-      severity: 'high',
-      metadata: {
-        facilityCode: facilityCode.trim(),
-      },
-    });
+    // Log critical operation
+    if (config) {
+      await logCriticalOperation(
+        req.user.sub,
+        'NHIF_CONFIG_UPDATE',
+        'NHIF_CONFIG',
+        config.id,
+        req.ip,
+        {
+          facilityCode: facilityCode.trim(),
+          facilityName: facilityName.trim() || null,
+        }
+      );
+    }
 
     res.json({ success: true, config });
   } catch (err) {
@@ -1406,21 +1432,345 @@ app.post('/api/visits/:id/convert-to-cash', authMiddleware, writeRateLimiter, cs
     }
 
     // Log cash conversion
-    await logSecurityEvent({
-      userId: req.user.sub,
-      action: 'NHIF_CASH_CONVERSION',
-      severity: 'medium',
-      metadata: {
+    await logCriticalOperation(
+      req.user.sub,
+      'NHIF_CASH_CONVERSION',
+      'VISIT',
+      id,
+      req.ip,
+      {
         visitId: id,
         reason: reason.trim(),
         previousPayerType: visit.payer_type,
-      },
-    });
+      }
+    );
 
     res.json({ success: true });
   } catch (err) {
     console.error('Convert visit to cash error:', err);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
+ * GET /api/audit-logs
+ * Fetch audit logs with filtering (Admin/Manager only)
+ */
+app.get('/api/audit-logs', authMiddleware, roleMiddleware(['super_admin', 'clinic_manager']), async (req, res) => {
+  try {
+    const { action, user, dateRange, entityType } = req.query;
+    
+    let query = supabase
+      .from('audit_logs')
+      .select(`
+        *,
+        user:user_id (
+          id,
+          email,
+          raw_user_meta_data
+        )
+      `)
+      .order('timestamp', { ascending: false })
+      .limit(500);
+
+    // Apply filters
+    if (action && action !== 'all') {
+      query = query.ilike('action', `%${action}%`);
+    }
+
+    if (user && user !== 'all') {
+      query = query.eq('user_id', user);
+    }
+
+    if (entityType) {
+      query = query.eq('entity_type', entityType);
+    }
+
+    // Date range filter
+    if (dateRange && dateRange !== 'all') {
+      const now = new Date();
+      let startDate;
+      
+      switch (dateRange) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+          break;
+        case 'week':
+          startDate = new Date(now);
+          startDate.setDate(now.getDate() - 7);
+          break;
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        default:
+          startDate = null;
+      }
+      
+      if (startDate) {
+        query = query.gte('timestamp', startDate.toISOString());
+      }
+    }
+
+    const { data: logs, error } = await query;
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Format logs with user information
+    const formattedLogs = (logs || []).map(log => {
+      const userData = log.user || {};
+      const userName = userData.raw_user_meta_data?.name || userData.email || 'Unknown User';
+      
+      return {
+        id: log.id,
+        user_id: log.user_id,
+        user_name: userName,
+        user_email: userData.email,
+        action: log.action,
+        entity_type: log.entity_type,
+        entity_id: log.entity_id,
+        ip_address: log.ip_address,
+        status: log.status,
+        metadata: log.metadata || {},
+        timestamp: log.timestamp,
+        created_at: log.created_at || log.timestamp,
+      };
+    });
+
+    res.json({ success: true, logs: formattedLogs });
+  } catch (err) {
+    console.error('Get audit logs error:', err);
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
+  }
+});
+
+/**
+ * POST /api/audit-logs/log
+ * Log a critical operation from the frontend
+ */
+app.post('/api/audit-logs/log', authMiddleware, writeRateLimiter, async (req, res) => {
+  try {
+    const { action, entityType, entityId, metadata } = req.body;
+
+    if (!action || !entityType || !entityId) {
+      return res.status(400).json({ error: 'Missing required fields: action, entityType, entityId' });
+    }
+
+    const { error } = await supabase.from('audit_logs').insert({
+      user_id: req.user.sub,
+      action: action,
+      entity_type: entityType,
+      entity_id: entityId,
+      ip_address: req.ip,
+      status: 'SUCCESS',
+      metadata: metadata || {},
+      timestamp: new Date().toISOString(),
+    });
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Log operation error:', err);
+    res.status(500).json({ error: 'Failed to log operation' });
+  }
+});
+
+/**
+ * GET /api/audit-logs/users
+ * Get list of users who have performed actions (for filter dropdown)
+ */
+app.get('/api/audit-logs/users', authMiddleware, roleMiddleware(['super_admin', 'clinic_manager']), async (req, res) => {
+  try {
+    const { data: logs, error } = await supabase
+      .from('audit_logs')
+      .select('user_id')
+      .not('user_id', 'is', null);
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Get unique user IDs
+    const uniqueUserIds = [...new Set((logs || []).map(log => log.user_id))];
+
+    // Fetch user details
+    const users = await Promise.all(
+      uniqueUserIds.map(async (userId) => {
+        try {
+          const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
+          if (userError || !userData) return null;
+          
+          return {
+            id: userId,
+            name: userData.user?.user_metadata?.name || userData.user?.email || 'Unknown',
+            email: userData.user?.email || '',
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const validUsers = users.filter(u => u !== null);
+    res.json({ success: true, users: validUsers });
+  } catch (err) {
+    console.error('Get audit log users error:', err);
+    res.status(500).json({ error: 'Failed to fetch audit log users' });
+  }
+});
+
+/**
+ * GET /api/providers
+ * Get all providers (doctors/optometrists)
+ */
+app.get('/api/providers', authMiddleware, async (req, res) => {
+  try {
+    const { role, status } = req.query;
+    
+    let query = supabase
+      .from('providers')
+      .select(`
+        *,
+        user:user_id (
+          id,
+          email,
+          raw_user_meta_data
+        )
+      `)
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (role) {
+      query = query.eq('role', role);
+    }
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data: providers, error } = await query;
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Format providers with user information
+    const formattedProviders = (providers || []).map(provider => {
+      const userData = provider.user || {};
+      return {
+        id: provider.id,
+        userId: provider.user_id,
+        name: provider.name,
+        role: provider.role,
+        specialization: provider.specialization,
+        isNHIFVerified: provider.is_nhif_verified,
+        status: provider.status,
+        queue: [], // Can be calculated from patients table if needed
+        email: userData.email,
+      };
+    });
+
+    res.json({ success: true, providers: formattedProviders });
+  } catch (err) {
+    console.error('Get providers error:', err);
+    res.status(500).json({ error: 'Failed to fetch providers' });
+  }
+});
+
+/**
+ * GET /api/medications
+ * Get all active medications
+ */
+app.get('/api/medications', authMiddleware, async (req, res) => {
+  try {
+    const { search, form, isCoveredByNHIF } = req.query;
+    
+    let query = supabase
+      .from('medications')
+      .select('*')
+      .eq('is_active', true)
+      .order('name', { ascending: true });
+
+    if (search) {
+      query = query.ilike('name', `%${search}%`);
+    }
+
+    if (form) {
+      query = query.eq('form', form);
+    }
+
+    if (isCoveredByNHIF !== undefined) {
+      query = query.eq('is_covered_by_nhif', isCoveredByNHIF === 'true');
+    }
+
+    const { data: medications, error } = await query;
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Format medications
+    const formattedMedications = (medications || []).map(med => ({
+      id: med.id,
+      name: med.name,
+      dosage: med.dosage,
+      form: med.form,
+      price: parseFloat(med.price),
+      stock: med.stock,
+      isCoveredByNHIF: med.is_covered_by_nhif,
+      isCoveredByPrivate: med.is_covered_by_private,
+    }));
+
+    res.json({ success: true, medications: formattedMedications });
+  } catch (err) {
+    console.error('Get medications error:', err);
+    res.status(500).json({ error: 'Failed to fetch medications' });
+  }
+});
+
+/**
+ * GET /api/icd10-codes
+ * Get ICD-10 codes (with optional search)
+ */
+app.get('/api/icd10-codes', authMiddleware, async (req, res) => {
+  try {
+    const { search, category } = req.query;
+    
+    let query = supabase
+      .from('icd10_codes')
+      .select('*')
+      .eq('is_active', true)
+      .order('code', { ascending: true });
+
+    if (search) {
+      query = query.or(`code.ilike.%${search}%,description.ilike.%${search}%`);
+    }
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    const { data: codes, error } = await query;
+
+    if (error) {
+      return res.status(400).json({ error: error.message });
+    }
+
+    // Format ICD-10 codes
+    const formattedCodes = (codes || []).map(code => ({
+      code: code.code,
+      description: code.description,
+      category: code.category,
+    }));
+
+    res.json({ success: true, codes: formattedCodes });
+  } catch (err) {
+    console.error('Get ICD-10 codes error:', err);
+    res.status(500).json({ error: 'Failed to fetch ICD-10 codes' });
   }
 });
 

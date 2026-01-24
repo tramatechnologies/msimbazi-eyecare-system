@@ -12,17 +12,30 @@ import { UserRole } from '../types';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 
-// Create admin client for user management operations
+// Create singleton admin client to avoid multiple GoTrueClient instances
+let adminClientInstance: ReturnType<typeof createClient> | null = null;
+
+// Create admin client for user management operations (singleton pattern)
 const getAdminClient = () => {
   if (!supabaseUrl || !supabaseServiceKey) {
     throw new Error('Missing Supabase admin credentials. User management requires service role key.');
   }
-  return createClient(supabaseUrl, supabaseServiceKey, {
+  
+  // Return existing instance if already created
+  if (adminClientInstance) {
+    return adminClientInstance;
+  }
+  
+  // Create new instance only if it doesn't exist
+  adminClientInstance = createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
-      persistSession: false
+      persistSession: false,
+      storage: typeof window !== 'undefined' ? undefined : undefined, // No storage for admin client
     }
   });
+  
+  return adminClientInstance;
 };
 
 export interface CreateUserData {
@@ -101,8 +114,53 @@ export const createUser = async (userData: CreateUserData): Promise<{ success: b
     await adminClient.auth.admin.updateUserById(authData.user.id, {
       user_metadata: {
         name: userData.name,
+        role: userData.role,
       },
     });
+
+    // If doctor role, ensure providers row exists (for Assign Doctor dropdown)
+    const doctorRoles = [UserRole.OPTOMETRIST, 'OPHTHALMOLOGIST' as UserRole];
+    if (doctorRoles.includes(userData.role)) {
+      try {
+        await adminClient.from('providers').upsert(
+          {
+            user_id: authData.user.id,
+            name: userData.name.trim(),
+            role: userData.role,
+            status: 'AVAILABLE',
+            is_nhif_verified: false,
+            is_active: true,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
+      } catch (provErr) {
+        console.error('Failed to sync provider for new doctor:', provErr);
+        // Don't fail user creation
+      }
+    }
+
+    // Log user creation in audit logs
+    try {
+      const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const currentUserId = currentUser.id || 'system';
+      await adminClient.from('audit_logs').insert({
+        user_id: currentUserId,
+        action: 'CREATE_USER',
+        entity_type: 'USER',
+        entity_id: authData.user.id,
+        metadata: {
+          newUserEmail: userData.email,
+          newUserName: userData.name,
+          newUserRole: userData.role,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (logError) {
+      console.error('Error logging user creation:', logError);
+      // Don't fail user creation if logging fails
+    }
 
     return {
       success: true,
@@ -178,6 +236,10 @@ export const getAllUsers = async (): Promise<{ success: boolean; users?: User[];
   }
 };
 
+const DOCTOR_ROLES = [UserRole.OPTOMETRIST, 'OPHTHALMOLOGIST'];
+const isDoctorRole = (r: string) =>
+  ['optometrist', 'ophthalmologist'].includes(String(r || '').toLowerCase());
+
 /**
  * Update user role
  */
@@ -185,11 +247,18 @@ export const updateUserRole = async (userId: string, role: UserRole): Promise<{ 
   try {
     const adminClient = getAdminClient();
 
-    // Map UserRole enum to database role format (app_role enum)
+    const { data: existingRole } = await adminClient
+      .from('user_roles')
+      .select('role')
+      .eq('user_id', userId)
+      .single();
+    const previousRole = (existingRole?.role as string) || '';
+
+    const { data: targetUser } = await adminClient.auth.admin.getUserById(userId);
+    const name = targetUser?.user?.user_metadata?.name || targetUser?.user?.email?.split('@')[0] || 'Unknown';
+
     const dbRole = role === UserRole.ADMIN ? 'super_admin' : role.toLowerCase();
 
-    // Use RPC or direct SQL to properly cast to app_role enum
-    // For now, we'll try direct update - Supabase should handle the enum casting
     const { error } = await adminClient
       .from('user_roles')
       .update({
@@ -203,6 +272,48 @@ export const updateUserRole = async (userId: string, role: UserRole): Promise<{ 
         success: false,
         error: error.message || 'Failed to update user role',
       };
+    }
+
+    const isDoctor = DOCTOR_ROLES.includes(role as any) || isDoctorRole(role);
+    const wasDoctor = isDoctorRole(previousRole);
+    try {
+      if (isDoctor) {
+        await adminClient.from('providers').upsert(
+          {
+            user_id: userId,
+            name,
+            role: role === UserRole.OPTOMETRIST ? 'OPTOMETRIST' : (role as string),
+            status: 'AVAILABLE',
+            is_nhif_verified: false,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'user_id' }
+        );
+      } else if (wasDoctor) {
+        await adminClient.from('providers').delete().eq('user_id', userId);
+      }
+    } catch (syncErr) {
+      console.error('Provider sync on role update:', syncErr);
+    }
+
+    try {
+      const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const currentUserId = currentUser.id || 'system';
+      await adminClient.from('audit_logs').insert({
+        user_id: currentUserId,
+        action: 'UPDATE_USER_ROLE',
+        entity_type: 'USER',
+        entity_id: userId,
+        metadata: {
+          targetUserEmail: targetUser?.user?.email,
+          newRole: role,
+          previousRole,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (logError) {
+      console.error('Error logging role update:', logError);
     }
 
     return { success: true };
@@ -222,11 +333,20 @@ export const deleteUser = async (userId: string): Promise<{ success: boolean; er
   try {
     const adminClient = getAdminClient();
 
-    // Delete from user_roles first
+    await adminClient.from('providers').delete().eq('user_id', userId);
     await adminClient
       .from('user_roles')
       .delete()
       .eq('user_id', userId);
+
+    // Get user info before deletion for logging
+    let userEmail = 'Unknown';
+    try {
+      const { data: userData } = await adminClient.auth.admin.getUserById(userId);
+      userEmail = userData?.user?.email || 'Unknown';
+    } catch {
+      // Continue with deletion even if we can't get user info
+    }
 
     // Delete from auth
     const { error } = await adminClient.auth.admin.deleteUser(userId);
@@ -238,6 +358,25 @@ export const deleteUser = async (userId: string): Promise<{ success: boolean; er
       };
     }
 
+    // Log user deletion in audit logs
+    try {
+      const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
+      const currentUserId = currentUser.id || 'system';
+      await adminClient.from('audit_logs').insert({
+        user_id: currentUserId,
+        action: 'DELETE_USER',
+        entity_type: 'USER',
+        entity_id: userId,
+        metadata: {
+          deletedUserEmail: userEmail,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (logError) {
+      console.error('Error logging user deletion:', logError);
+      // Don't fail deletion if logging fails
+    }
+
     return { success: true };
   } catch (error: any) {
     console.error('Error deleting user:', error);
@@ -245,6 +384,56 @@ export const deleteUser = async (userId: string): Promise<{ success: boolean; er
       success: false,
       error: error.message || 'Failed to delete user',
     };
+  }
+};
+
+/**
+ * Backfill providers from users with doctor roles (optometrist, ophthalmologist).
+ * Call when Assign Doctor dropdown is empty but doctors exist in User Management.
+ * Uses service role; safe to call from Registration when no doctors found.
+ */
+export const syncProvidersFromUsers = async (): Promise<{ success: boolean; error?: string }> => {
+  try {
+    const adminClient = getAdminClient();
+    const { success, users, error } = await getAllUsers();
+    if (!success || !users) {
+      return { success: false, error: error || 'Could not load users' };
+    }
+    const doctors = users.filter((u) => isDoctorRole(u.role));
+    if (doctors.length === 0) return { success: true };
+
+    const { data: existing } = await adminClient
+      .from('providers')
+      .select('user_id');
+    const existingIds = new Set((existing || []).map((r: { user_id: string }) => r.user_id));
+
+    const roleMap: Record<string, string> = {
+      optometrist: 'OPTOMETRIST',
+      ophthalmologist: 'OPHTHALMOLOGIST',
+    };
+    for (const u of doctors) {
+      if (existingIds.has(u.id)) continue;
+      const role = roleMap[String(u.role).toLowerCase()] || 'OPTOMETRIST';
+      const { error: ins } = await adminClient.from('providers').insert({
+        user_id: u.id,
+        name: u.name || u.email?.split('@')[0] || 'Unknown',
+        role,
+        status: 'AVAILABLE',
+        is_nhif_verified: false,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      });
+      if (ins) {
+        console.warn('syncProvidersFromUsers: insert failed for', u.id, ins);
+        continue;
+      }
+      existingIds.add(u.id);
+    }
+    return { success: true };
+  } catch (e: any) {
+    console.error('syncProvidersFromUsers:', e);
+    return { success: false, error: e?.message || 'Sync failed' };
   }
 };
 

@@ -19,294 +19,12 @@ import { sanitizeInput, validatePrescription } from '../utils/validation';
 import { CLINICAL_FEES, VALIDATION_LIMITS } from '../constants';
 import { AppError } from '../utils/errorHandler';
 import { formatDate, formatTime } from '../utils/dateTimeUtils';
+import { logCriticalOperation } from '../services/auditLogService';
+import { getICD10Codes } from '../services/icd10Service';
 
 interface ClinicalProps {
   activeProvider?: Provider;
 }
-
-const ICD10_COMMON_EYE_CODES = [
-  // Disorders of Eyelid (H00-H05)
-  { code: 'H00.0', description: 'Hordeolum externum (Stye)' },
-  { code: 'H00.1', description: 'Hordeolum internum' },
-  { code: 'H01.0', description: 'Blepharitis' },
-  { code: 'H01.1', description: 'Noninfectious dermatoses of eyelid' },
-  { code: 'H02.0', description: 'Entropion and trichiasis of eyelid' },
-  { code: 'H02.1', description: 'Ectropion of eyelid' },
-  { code: 'H02.2', description: 'Lagophthalmos' },
-  { code: 'H02.3', description: 'Blepharochalasis' },
-  { code: 'H02.4', description: 'Ptosis of eyelid' },
-  { code: 'H02.5', description: 'Other disorders affecting eyelid function' },
-  { code: 'H02.6', description: 'Xanthelasma of eyelid' },
-  { code: 'H02.7', description: 'Other degenerative disorders of eyelid' },
-  { code: 'H03.0', description: 'Parasitic infestation of eyelid' },
-  { code: 'H03.1', description: 'Involvement of eyelid in other infectious diseases' },
-  { code: 'H04.0', description: 'Dacryoadenitis' },
-  { code: 'H04.1', description: 'Other disorders of lacrimal gland' },
-  { code: 'H04.2', description: 'Epiphora' },
-  { code: 'H04.3', description: 'Acute and unspecified inflammation of lacrimal passages' },
-  { code: 'H04.4', description: 'Chronic inflammation of lacrimal passages' },
-  { code: 'H04.5', description: 'Stenosis and insufficiency of lacrimal passages' },
-  { code: 'H04.6', description: 'Other changes in lacrimal passages' },
-  { code: 'H05.0', description: 'Acute inflammation of orbit' },
-  { code: 'H05.1', description: 'Chronic inflammatory disorders of orbit' },
-  { code: 'H05.2', description: 'Exophthalmic conditions' },
-  { code: 'H05.3', description: 'Deformity of orbit' },
-  { code: 'H05.4', description: 'Enophthalmos' },
-  { code: 'H05.5', description: 'Retained foreign body in orbit' },
-  
-  // Disorders of Conjunctiva (H10-H11)
-  { code: 'H10.0', description: 'Mucopurulent conjunctivitis' },
-  { code: 'H10.1', description: 'Acute atopic conjunctivitis' },
-  { code: 'H10.2', description: 'Other acute conjunctivitis' },
-  { code: 'H10.3', description: 'Unspecified acute conjunctivitis' },
-  { code: 'H10.4', description: 'Chronic conjunctivitis' },
-  { code: 'H10.5', description: 'Blepharoconjunctivitis' },
-  { code: 'H10.8', description: 'Other conjunctivitis' },
-  { code: 'H10.9', description: 'Unspecified conjunctivitis' },
-  { code: 'H11.0', description: 'Pterygium' },
-  { code: 'H11.1', description: 'Conjunctival degenerations and deposits' },
-  { code: 'H11.2', description: 'Conjunctival scars' },
-  { code: 'H11.3', description: 'Conjunctival hemorrhage' },
-  { code: 'H11.4', description: 'Other conjunctival vascular disorders' },
-  { code: 'H11.8', description: 'Other specified disorders of conjunctiva' },
-  { code: 'H11.9', description: 'Unspecified disorder of conjunctiva' },
-  
-  // Disorders of Sclera, Cornea, Iris and Ciliary Body (H15-H22)
-  { code: 'H15.0', description: 'Scleritis' },
-  { code: 'H15.1', description: 'Episcleritis' },
-  { code: 'H15.8', description: 'Other disorders of sclera' },
-  { code: 'H15.9', description: 'Unspecified disorder of sclera' },
-  { code: 'H16.0', description: 'Corneal ulcer' },
-  { code: 'H16.1', description: 'Other superficial keratitis without conjunctivitis' },
-  { code: 'H16.2', description: 'Keratoconjunctivitis' },
-  { code: 'H16.3', description: 'Interstitial and deep keratitis' },
-  { code: 'H16.4', description: 'Corneal neovascularization' },
-  { code: 'H16.8', description: 'Other keratitis' },
-  { code: 'H16.9', description: 'Unspecified keratitis' },
-  { code: 'H17.0', description: 'Adherent leukoma' },
-  { code: 'H17.1', description: 'Other central corneal opacity' },
-  { code: 'H17.8', description: 'Other corneal scars and opacities' },
-  { code: 'H17.9', description: 'Unspecified corneal scar and opacity' },
-  { code: 'H18.0', description: 'Corneal pigmentations and deposits' },
-  { code: 'H18.1', description: 'Bullous keratopathy' },
-  { code: 'H18.2', description: 'Other corneal edema' },
-  { code: 'H18.3', description: 'Changes in corneal membranes' },
-  { code: 'H18.4', description: 'Corneal degeneration' },
-  { code: 'H18.5', description: 'Hereditary corneal dystrophies' },
-  { code: 'H18.6', description: 'Keratoconus' },
-  { code: 'H18.7', description: 'Other corneal deformities' },
-  { code: 'H18.8', description: 'Other specified disorders of cornea' },
-  { code: 'H18.9', description: 'Unspecified disorder of cornea' },
-  { code: 'H19.0', description: 'Scleritis and episcleritis in diseases classified elsewhere' },
-  { code: 'H19.1', description: 'Keratoconjunctivitis in diseases classified elsewhere' },
-  { code: 'H19.2', description: 'Keratoconjunctivitis sicca, not specified as Sjögren' },
-  { code: 'H19.3', description: 'Other disorders of sclera and cornea in diseases classified elsewhere' },
-  { code: 'H20.0', description: 'Acute and subacute iridocyclitis' },
-  { code: 'H20.1', description: 'Chronic iridocyclitis' },
-  { code: 'H20.2', description: 'Lens-induced iridocyclitis' },
-  { code: 'H20.8', description: 'Other iridocyclitis' },
-  { code: 'H20.9', description: 'Unspecified iridocyclitis' },
-  { code: 'H21.0', description: 'Hyphema' },
-  { code: 'H21.1', description: 'Other vascular disorders of iris and ciliary body' },
-  { code: 'H21.2', description: 'Degenerative disorders of iris and ciliary body' },
-  { code: 'H21.3', description: 'Cyst of iris, ciliary body and anterior chamber' },
-  { code: 'H21.4', description: 'Pupillary membranes' },
-  { code: 'H21.5', description: 'Other adhesions and disruptions of iris and ciliary body' },
-  { code: 'H21.8', description: 'Other specified disorders of iris and ciliary body' },
-  { code: 'H21.9', description: 'Unspecified disorder of iris and ciliary body' },
-  { code: 'H22.0', description: 'Iridocyclitis in infectious and parasitic diseases classified elsewhere' },
-  { code: 'H22.1', description: 'Iridocyclitis in diseases classified elsewhere' },
-  { code: 'H22.8', description: 'Other disorders of iris and ciliary body in diseases classified elsewhere' },
-  
-  // Disorders of Lens (H25-H28)
-  { code: 'H25.0', description: 'Age-related incipient cataract' },
-  { code: 'H25.1', description: 'Age-related nuclear cataract' },
-  { code: 'H25.2', description: 'Age-related cataract, morgagnian type' },
-  { code: 'H25.8', description: 'Other age-related cataract' },
-  { code: 'H25.9', description: 'Unspecified age-related cataract' },
-  { code: 'H26.0', description: 'Infantile and juvenile cataract' },
-  { code: 'H26.1', description: 'Traumatic cataract' },
-  { code: 'H26.2', description: 'Complicated cataract' },
-  { code: 'H26.3', description: 'Drug-induced cataract' },
-  { code: 'H26.4', description: 'Secondary cataract' },
-  { code: 'H26.8', description: 'Other specified cataract' },
-  { code: 'H26.9', description: 'Unspecified cataract' },
-  { code: 'H27.0', description: 'Aphakia' },
-  { code: 'H27.1', description: 'Luxation of lens' },
-  { code: 'H27.8', description: 'Other specified disorders of lens' },
-  { code: 'H27.9', description: 'Unspecified disorder of lens' },
-  { code: 'H28.0', description: 'Diabetic cataract' },
-  { code: 'H28.1', description: 'Cataract in other endocrine, nutritional and metabolic diseases' },
-  { code: 'H28.2', description: 'Cataract in other diseases classified elsewhere' },
-  
-  // Disorders of Choroid and Retina (H30-H36)
-  { code: 'H30.0', description: 'Focal chorioretinal inflammation' },
-  { code: 'H30.1', description: 'Disseminated chorioretinal inflammation' },
-  { code: 'H30.2', description: 'Posterior cyclitis' },
-  { code: 'H30.8', description: 'Other chorioretinal inflammations' },
-  { code: 'H30.9', description: 'Unspecified chorioretinal inflammation' },
-  { code: 'H31.0', description: 'Chorioretinal scars' },
-  { code: 'H31.1', description: 'Choroidal degeneration' },
-  { code: 'H31.2', description: 'Hereditary choroidal dystrophy' },
-  { code: 'H31.3', description: 'Choroidal hemorrhage and rupture' },
-  { code: 'H31.4', description: 'Choroidal detachment' },
-  { code: 'H31.8', description: 'Other specified disorders of choroid' },
-  { code: 'H31.9', description: 'Unspecified disorder of choroid' },
-  { code: 'H32.0', description: 'Chorioretinal inflammation in infectious and parasitic diseases classified elsewhere' },
-  { code: 'H32.8', description: 'Other chorioretinal disorders in diseases classified elsewhere' },
-  { code: 'H33.0', description: 'Retinal detachment with retinal break' },
-  { code: 'H33.1', description: 'Retinoschisis and retinal cysts' },
-  { code: 'H33.2', description: 'Serous retinal detachment' },
-  { code: 'H33.3', description: 'Retinal breaks without detachment' },
-  { code: 'H33.4', description: 'Traction detachment of retina' },
-  { code: 'H33.5', description: 'Other retinal detachments' },
-  { code: 'H34.0', description: 'Transient retinal artery occlusion' },
-  { code: 'H34.1', description: 'Central retinal artery occlusion' },
-  { code: 'H34.2', description: 'Other retinal artery occlusions' },
-  { code: 'H34.8', description: 'Other retinal vascular occlusions' },
-  { code: 'H34.9', description: 'Unspecified retinal vascular occlusion' },
-  { code: 'H35.0', description: 'Background retinopathy and retinal vascular changes' },
-  { code: 'H35.1', description: 'Retinopathy of prematurity' },
-  { code: 'H35.2', description: 'Other proliferative retinopathy' },
-  { code: 'H35.3', description: 'Degeneration of macula and posterior pole' },
-  { code: 'H35.4', description: 'Peripheral retinal degenerations' },
-  { code: 'H35.5', description: 'Hereditary retinal dystrophies' },
-  { code: 'H35.6', description: 'Retinal hemorrhage' },
-  { code: 'H35.7', description: 'Separation of retinal layers' },
-  { code: 'H35.8', description: 'Other specified retinal disorders' },
-  { code: 'H35.9', description: 'Unspecified retinal disorder' },
-  { code: 'H36.0', description: 'Diabetic retinopathy' },
-  { code: 'H36.8', description: 'Other retinal disorders in diseases classified elsewhere' },
-  
-  // Glaucoma (H40-H42)
-  { code: 'H40.0', description: 'Glaucoma suspect' },
-  { code: 'H40.1', description: 'Open-angle glaucoma' },
-  { code: 'H40.10', description: 'Unspecified open-angle glaucoma' },
-  { code: 'H40.11', description: 'Primary open-angle glaucoma' },
-  { code: 'H40.12', description: 'Low-tension glaucoma' },
-  { code: 'H40.13', description: 'Pigmentary glaucoma' },
-  { code: 'H40.14', description: 'Capsular glaucoma with pseudoexfoliation of lens' },
-  { code: 'H40.15', description: 'Residual stage of open-angle glaucoma' },
-  { code: 'H40.2', description: 'Primary angle-closure glaucoma' },
-  { code: 'H40.20', description: 'Unspecified primary angle-closure glaucoma' },
-  { code: 'H40.21', description: 'Acute angle-closure glaucoma' },
-  { code: 'H40.22', description: 'Chronic angle-closure glaucoma' },
-  { code: 'H40.23', description: 'Intermittent angle-closure glaucoma' },
-  { code: 'H40.24', description: 'Residual stage of angle-closure glaucoma' },
-  { code: 'H40.3', description: 'Glaucoma secondary to eye trauma' },
-  { code: 'H40.4', description: 'Glaucoma secondary to eye inflammation' },
-  { code: 'H40.5', description: 'Glaucoma secondary to other eye disorders' },
-  { code: 'H40.6', description: 'Glaucoma secondary to drugs' },
-  { code: 'H40.8', description: 'Other glaucoma' },
-  { code: 'H40.9', description: 'Unspecified glaucoma' },
-  { code: 'H42.0', description: 'Glaucoma in endocrine, nutritional and metabolic diseases' },
-  { code: 'H42.8', description: 'Glaucoma in other diseases classified elsewhere' },
-  
-  // Disorders of Vitreous Body and Globe (H43-H45)
-  { code: 'H43.0', description: 'Vitreous prolapse' },
-  { code: 'H43.1', description: 'Vitreous hemorrhage' },
-  { code: 'H43.2', description: 'Crystalline deposits in vitreous body' },
-  { code: 'H43.3', description: 'Other vitreous opacities' },
-  { code: 'H43.8', description: 'Other disorders of vitreous body' },
-  { code: 'H43.9', description: 'Unspecified disorder of vitreous body' },
-  { code: 'H44.0', description: 'Purulent endophthalmitis' },
-  { code: 'H44.1', description: 'Other endophthalmitis' },
-  { code: 'H44.2', description: 'Degenerative myopia' },
-  { code: 'H44.3', description: 'Other degenerative disorders of globe' },
-  { code: 'H44.4', description: 'Hypotony of eye' },
-  { code: 'H44.5', description: 'Degenerated conditions of globe' },
-  { code: 'H44.6', description: 'Retained foreign body in globe' },
-  { code: 'H44.7', description: 'Disorganized globe' },
-  { code: 'H44.8', description: 'Other disorders of globe' },
-  { code: 'H44.9', description: 'Unspecified disorder of globe' },
-  { code: 'H45.0', description: 'Vitreous hemorrhage in diseases classified elsewhere' },
-  { code: 'H45.1', description: 'Endophthalmitis in diseases classified elsewhere' },
-  { code: 'H45.8', description: 'Other disorders of vitreous body and globe in diseases classified elsewhere' },
-  
-  // Disorders of Optic Nerve and Visual Pathways (H46-H48)
-  { code: 'H46.0', description: 'Optic neuritis' },
-  { code: 'H46.1', description: 'Optic disc edema' },
-  { code: 'H46.2', description: 'Optic atrophy' },
-  { code: 'H46.3', description: 'Other disorders of optic disc' },
-  { code: 'H46.4', description: 'Optic chiasm disorders' },
-  { code: 'H46.8', description: 'Other disorders of optic nerve and visual pathways' },
-  { code: 'H46.9', description: 'Unspecified disorder of optic nerve and visual pathways' },
-  { code: 'H47.0', description: 'Disorders of optic nerve, not elsewhere classified' },
-  { code: 'H47.1', description: 'Papilledema associated with increased intracranial pressure' },
-  { code: 'H47.2', description: 'Optic atrophy' },
-  { code: 'H47.3', description: 'Other disorders of optic disc' },
-  { code: 'H47.4', description: 'Disorders of optic chiasm' },
-  { code: 'H47.5', description: 'Disorders of other visual pathways' },
-  { code: 'H47.6', description: 'Disorders of visual cortex' },
-  { code: 'H47.7', description: 'Unspecified disorder of visual pathways' },
-  { code: 'H48.0', description: 'Optic atrophy in diseases classified elsewhere' },
-  { code: 'H48.1', description: 'Retrobulbar neuritis in diseases classified elsewhere' },
-  { code: 'H48.8', description: 'Other disorders of optic nerve and visual pathways in diseases classified elsewhere' },
-  
-  // Disorders of Ocular Muscles, Binocular Movement, Accommodation and Refraction (H49-H52)
-  { code: 'H49.0', description: 'Third nerve palsy' },
-  { code: 'H49.1', description: 'Fourth nerve palsy' },
-  { code: 'H49.2', description: 'Sixth nerve palsy' },
-  { code: 'H49.3', description: 'Total ophthalmoplegia' },
-  { code: 'H49.4', description: 'Progressive external ophthalmoplegia' },
-  { code: 'H49.8', description: 'Other paralytic strabismus' },
-  { code: 'H49.9', description: 'Unspecified paralytic strabismus' },
-  { code: 'H50.0', description: 'Convergent concomitant strabismus' },
-  { code: 'H50.1', description: 'Divergent concomitant strabismus' },
-  { code: 'H50.2', description: 'Vertical strabismus' },
-  { code: 'H50.3', description: 'Intermittent heterotropia' },
-  { code: 'H50.4', description: 'Other and unspecified heterotropia' },
-  { code: 'H50.5', description: 'Heterophoria' },
-  { code: 'H50.6', description: 'Mechanical strabismus' },
-  { code: 'H50.8', description: 'Other specified strabismus' },
-  { code: 'H50.9', description: 'Unspecified strabismus' },
-  { code: 'H51.0', description: 'Palsy of conjugate gaze' },
-  { code: 'H51.1', description: 'Convergence insufficiency and excess' },
-  { code: 'H51.2', description: 'Internuclear ophthalmoplegia' },
-  { code: 'H51.8', description: 'Other specified disorders of binocular movement' },
-  { code: 'H51.9', description: 'Unspecified disorder of binocular movement' },
-  { code: 'H52.0', description: 'Hypermetropia' },
-  { code: 'H52.1', description: 'Myopia' },
-  { code: 'H52.2', description: 'Astigmatism' },
-  { code: 'H52.3', description: 'Anisometropia and aniseikonia' },
-  { code: 'H52.4', description: 'Presbyopia' },
-  { code: 'H52.5', description: 'Disorders of accommodation' },
-  { code: 'H52.6', description: 'Other disorders of refraction' },
-  { code: 'H52.7', description: 'Unspecified disorder of refraction' },
-  
-  // Visual Disturbances and Blindness (H53-H54)
-  { code: 'H53.0', description: 'Amblyopia ex anopsia' },
-  { code: 'H53.1', description: 'Subjective visual disturbances' },
-  { code: 'H53.2', description: 'Diplopia' },
-  { code: 'H53.3', description: 'Other disorders of binocular vision' },
-  { code: 'H53.4', description: 'Visual field defects' },
-  { code: 'H53.5', description: 'Color vision deficiencies' },
-  { code: 'H53.6', description: 'Night blindness' },
-  { code: 'H53.8', description: 'Other visual disturbances' },
-  { code: 'H53.9', description: 'Unspecified visual disturbance' },
-  { code: 'H54.0', description: 'Blindness, both eyes' },
-  { code: 'H54.1', description: 'Blindness, one eye, low vision other eye' },
-  { code: 'H54.2', description: 'Blindness, one eye' },
-  { code: 'H54.3', description: 'Unqualified visual loss, both eyes' },
-  { code: 'H54.4', description: 'Unqualified visual loss, one eye' },
-  { code: 'H54.5', description: 'Unqualified visual loss, unspecified eye' },
-  { code: 'H54.6', description: 'Severe visual impairment, both eyes' },
-  { code: 'H54.7', description: 'Moderate visual impairment, both eyes' },
-  { code: 'H54.8', description: 'Mild or no visual impairment, both eyes' },
-  
-  // Other Disorders of Eye and Adnexa (H55-H59)
-  { code: 'H55.0', description: 'Nystagmus and other irregular eye movements' },
-  { code: 'H57.0', description: 'Anomalies of pupillary function' },
-  { code: 'H57.1', description: 'Ocular pain' },
-  { code: 'H57.8', description: 'Other specified disorders of eye and adnexa' },
-  { code: 'H57.9', description: 'Unspecified disorder of eye and adnexa' },
-  { code: 'H58.0', description: 'Anomalies of pupillary function in diseases classified elsewhere' },
-  { code: 'H58.1', description: 'Visual disturbances in diseases classified elsewhere' },
-  { code: 'H58.8', description: 'Other specified disorders of eye and adnexa in diseases classified elsewhere' },
-  { code: 'H59.0', description: 'Vitreous syndrome following cataract surgery' },
-  { code: 'H59.8', description: 'Other postprocedural disorders of eye and adnexa' },
-  { code: 'H59.9', description: 'Unspecified postprocedural disorder of eye and adnexa' },
-];
 
 const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
   const { patients, updatePatient, refreshPatient, useApi } = usePatients();
@@ -414,6 +132,25 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
     addOd?: string;
     addOs?: string;
   }>({});
+  const [icd10Codes, setIcd10Codes] = useState<Array<{ code: string; description: string }>>([]);
+  const [isLoadingIcd10, setIsLoadingIcd10] = useState(false);
+
+  // Load ICD-10 codes from API (database)
+  useEffect(() => {
+    const load = async () => {
+      setIsLoadingIcd10(true);
+      try {
+        const codes = await getICD10Codes();
+        setIcd10Codes(codes);
+      } catch (e) {
+        console.error('Failed to load ICD-10 codes:', e);
+        setIcd10Codes([]);
+      } finally {
+        setIsLoadingIcd10(false);
+      }
+    };
+    load();
+  }, []);
 
   const activePatient = patients.find(p => p.id === selectedPatientId);
   const [currentVisitId, setCurrentVisitId] = useState<string | null>(null);
@@ -669,6 +406,10 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
   const handleComplete = async () => {
     if (!selectedPatientId || !activePatient) return;
     
+    if (!confirm(`Are you sure you want to complete the consultation for ${activePatient.name}? This will finalize the clinical examination and route the patient to the next step.`)) {
+      return;
+    }
+    
     // Check NHIF service gate
     if (activePatient.insuranceType === InsuranceType.NHIF && currentVisitId) {
       const gateResult = await canStartConsultation(currentVisitId);
@@ -820,9 +561,23 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
       ]
     });
     
-    if (result.success) {
-      showSuccess(successMessage);
-      setSelectedPatientId(null);
+      if (result.success) {
+        // Log consultation completion
+        await logCriticalOperation(
+          'COMPLETE_CONSULTATION',
+          'PATIENT',
+          selectedPatientId,
+          {
+            patientName: activePatient.name,
+            nextStatus: nextStatus,
+            hasPrescription: hasPrescription,
+            hasMedications: needsMedications,
+            diagnosis: diagnosis,
+          }
+        );
+
+        showSuccess(successMessage);
+        setSelectedPatientId(null);
       resetForm();
     } else {
       showError(result.error || 'Failed to complete clinical session');
@@ -911,6 +666,10 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
   };
 
   const handleRemoveMedication = (id: string) => {
+    const medication = medicationPrescriptions.find(med => med.id === id);
+    if (!confirm(`Are you sure you want to remove ${medication?.medication || 'this medication'} from the prescription?`)) {
+      return;
+    }
     setMedicationPrescriptions(medicationPrescriptions.filter(med => med.id !== id));
   };
 
@@ -1479,8 +1238,8 @@ const Clinical: React.FC<ClinicalProps> = ({ activeProvider }) => {
                 onChange={(e) => setIcd10Code(e.target.value)}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-normal focus:ring-2 focus:ring-brand-primary focus:border-brand-primary outline-none transition-all"
               >
-                <option value="">Select ICD-10 Code</option>
-                {ICD10_COMMON_EYE_CODES.map(code => (
+                <option value="">{isLoadingIcd10 ? 'Loading ICD-10 codes...' : 'Select ICD-10 Code'}</option>
+                {icd10Codes.map(code => (
                   <option key={code.code} value={code.code}>{code.code} - {code.description}</option>
                 ))}
               </select>

@@ -8,7 +8,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { Patient } from '../types';
 import { storageService } from '../services/storageService';
 import {
-  isApiAvailable,
+  useSupabaseForPatients,
   mapPatientFromApi,
   listPatients,
   createPatient as apiCreatePatient,
@@ -56,7 +56,7 @@ export const PatientProvider: React.FC<PatientProviderProps> = ({
   const [error, setError] = useState<string | null>(null);
   const hasLoadedRef = useRef(false);
 
-  const useApi = isApiAvailable();
+  const useApi = useSupabaseForPatients();
 
   // Load patients on mount: from API if available, else localStorage
   useEffect(() => {

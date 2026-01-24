@@ -1,64 +1,9 @@
 
 import { UserRole, Provider, Patient, PatientStatus, InsuranceType } from './types';
 
-export const MOCK_PROVIDERS: Provider[] = [
-  { id: 'opt-1', name: 'Dr. Namangi Fadhili Msangi', role: UserRole.OPTOMETRIST, isNHIFVerified: true, status: 'AVAILABLE', queue: [], specialization: 'General Optometry' },
-  { id: 'opt-2', name: 'Dr. Sarah Kamau', role: UserRole.OPTOMETRIST, isNHIFVerified: true, status: 'BUSY', queue: [], specialization: 'Glaucoma' },
-  { id: 'opt-3', name: 'Dr. John Mwangi', role: UserRole.OPTOMETRIST, isNHIFVerified: true, status: 'ON_BREAK', queue: [], specialization: 'Pediatrics' },
-  { id: 'opt-4', name: 'Dr. Grace Nduta', role: UserRole.OPTOMETRIST, isNHIFVerified: true, status: 'AVAILABLE', queue: [], specialization: 'Refraction' },
-  { id: 'opt-5', name: 'Dr. Peter Omondi', role: UserRole.OPTOMETRIST, isNHIFVerified: false, status: 'AVAILABLE', queue: [], specialization: 'Refraction' },
-];
-
-export const MOCK_PATIENTS: Patient[] = [
-  {
-    id: 'P001',
-    name: 'John Doe',
-    phone: '0712345678',
-    dob: '1985-05-12',
-    gender: 'Male',
-    insuranceType: InsuranceType.NHIF,
-    insuranceNumber: 'NH-987654321',
-    status: PatientStatus.WAITING,
-    assignedProviderId: 'opt-1',
-    checkedInAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-    chiefComplaint: 'Blurry distance vision for 3 months.',
-    billItems: [],
-    prescriptionHistory: [
-      {
-        date: '2023-05-15',
-        od: '-1.50 DS',
-        os: '-1.75 DS',
-        addOd: '+1.50',
-        addOs: '+1.50',
-        dispensedItems: ['Titanium Frame', 'Progressive Blue Cut Lenses'],
-        providerName: 'Dr. Sarah Kamau'
-      },
-      {
-        date: '2022-01-10',
-        od: '-1.25 DS',
-        os: '-1.25 DS',
-        addOd: '+1.25',
-        addOs: '+1.25',
-        dispensedItems: ['Plastic Classic Frame', 'Bifocal Lenses'],
-        providerName: 'Dr. John Mwangi'
-      }
-    ]
-  },
-  {
-    id: 'P002',
-    name: 'Jane Smith',
-    phone: '0722334455',
-    dob: '1992-11-20',
-    gender: 'Female',
-    insuranceType: InsuranceType.CASH,
-    status: PatientStatus.IN_CLINICAL,
-    assignedProviderId: 'opt-2',
-    checkedInAt: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-    chiefComplaint: 'Regular checkup.',
-    billItems: [],
-    prescriptionHistory: []
-  }
-];
+// MOCK_PROVIDERS and MOCK_PATIENTS have been removed
+// Providers are now fetched from the database via providerService
+// Patients are managed through PatientContext and the database
 
 // Brand colors - Update these with colors extracted from the logo
 // Use the extract-colors.html file to identify colors from the logo

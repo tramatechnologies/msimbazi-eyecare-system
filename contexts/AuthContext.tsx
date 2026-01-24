@@ -4,9 +4,9 @@
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { UserRole } from '../types';
 import { AuthenticationError, handleError } from '../utils/errorHandler';
+import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -20,30 +20,6 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
-
-// Initialize Supabase client with error handling
-let supabase: ReturnType<typeof createClient> | null = null;
-
-try {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-  if (supabaseUrl && supabaseAnonKey) {
-    supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-        storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-      },
-    });
-  } else {
-    console.warn('Supabase environment variables not found. Authentication will not work.');
-    console.warn('Please ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your .env file.');
-  }
-} catch (error) {
-  console.error('Error initializing Supabase client:', error);
-}
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -82,7 +58,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   // Check for existing session on mount
   useEffect(() => {
-    if (!supabase) {
+    if (!isSupabaseConfigured()) {
       console.error('Supabase client not initialized. Cannot restore session.');
       return;
     }
@@ -90,7 +66,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const restoreSession = async () => {
       try {
         // Check for existing Supabase session
-        const { data: { session }, error } = await supabase!.auth.getSession();
+        const { data: { session }, error } = await getSupabase().auth.getSession();
         
         if (error) {
           console.error('Error restoring session:', error);
@@ -104,12 +80,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         // Only restore if we have a valid session with a user
         if (session?.user && session.access_token) {
           // Verify the session is still valid by checking if user exists
-          const { data: { user: currentUser }, error: userError } = await supabase!.auth.getUser();
+          const { data: { user: currentUser }, error: userError } = await getSupabase().auth.getUser();
           
           if (userError || !currentUser) {
             // Session is invalid, clear it
             console.warn('Invalid session detected, clearing...');
-            await supabase!.auth.signOut();
+            await getSupabase().auth.signOut();
             setIsAuthenticated(false);
             setActiveRole(null);
             setUser(null);
@@ -117,7 +93,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           }
 
           // Get user role from user_roles table
-          const { data: userRole, error: roleError } = await supabase!
+          const { data: userRole, error: roleError } = await getSupabase()
             .from('user_roles')
             .select('role')
             .eq('user_id', session.user.id)
@@ -157,10 +133,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     restoreSession();
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase!.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = getSupabase().auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         // Get user role
-        const { data: userRole } = await supabase!
+        const { data: userRole } = await getSupabase()
           .from('user_roles')
           .select('role')
           .eq('user_id', session.user.id)
@@ -181,7 +157,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(null);
       } else if (event === 'TOKEN_REFRESHED' && session?.user) {
         // Update user data on token refresh
-        const { data: userRole } = await supabase!
+        const { data: userRole } = await getSupabase()
           .from('user_roles')
           .select('role')
           .eq('user_id', session.user.id)
@@ -202,9 +178,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
   }, []);
 
+  const LOGIN_TIMEOUT_MS = 15_000;
+
   /**
    * Login with email and password
-   * Uses Supabase Auth directly
+   * Uses Supabase Auth directly. Wrapped in a timeout so we always clear loading.
    */
   const login = useCallback(async (
     email: string,
@@ -212,45 +190,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   ): Promise<{ success: boolean; error?: string }> => {
     setIsLoading(true);
 
-    try {
-      if (!supabase) {
+    const timeout = (ms: number) =>
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('LOGIN_TIMEOUT')), ms)
+      );
+
+    const doLogin = async (): Promise<{ success: boolean; error?: string }> => {
+      if (!isSupabaseConfigured()) {
         return {
           success: false,
           error: 'Supabase client not initialized. Please check your environment variables.',
         };
       }
+      if (!email?.trim()) throw new AuthenticationError('Email is required');
+      if (!password) throw new AuthenticationError('Password is required');
 
-      // Validate input
-      if (!email || !email.trim()) {
-        throw new AuthenticationError('Email is required');
-      }
-
-      if (!password) {
-        throw new AuthenticationError('Password is required');
-      }
-
-      // Sign in with Supabase
+      const supabase = getSupabase();
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: email.toLowerCase().trim(),
         password,
       });
 
       if (authError) {
-        return {
-          success: false,
-          error: authError.message || 'Authentication failed',
-        };
+        return { success: false, error: authError.message || 'Authentication failed' };
       }
-
       if (!authData.user) {
-        return {
-          success: false,
-          error: 'Authentication failed',
-        };
+        return { success: false, error: 'Authentication failed' };
       }
 
-      // Get user role from user_roles table
-      const { data: userRole, error: roleError } = await supabase!
+      const { data: userRole, error: roleError } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', authData.user.id)
@@ -263,38 +231,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         };
       }
 
-      // Get backend API token for patient data operations
-      const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-      if (API_BASE_URL) {
-        try {
-          // Call backend API login to get JWT token for API operations
-          const apiResponse = await fetch(`${API_BASE_URL}/api/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              email: email.toLowerCase().trim(),
-              password: password, // Note: In production, this should use a different flow
-            }),
-          });
-
-          if (apiResponse.ok) {
-            const apiData = await apiResponse.json();
-            if (apiData.accessToken) {
-              // Store backend API token for patient service
-              sessionStorage.setItem('authToken', apiData.accessToken);
-              if (apiData.csrfToken) {
-                sessionStorage.setItem('csrfToken', apiData.csrfToken);
-              }
-            }
-          } else {
-            console.warn('Backend API login failed, continuing with Supabase Auth only');
-          }
-        } catch (apiError) {
-          console.warn('Could not connect to backend API, using Supabase Auth only:', apiError);
-          // Continue with Supabase Auth even if backend API is unavailable
-        }
-      }
-
       setIsAuthenticated(true);
       setActiveRole(mapDatabaseRoleToUserRole(userRole.role));
       setUser({
@@ -302,14 +238,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         email: authData.user.email || '',
         name: authData.user.user_metadata?.name || undefined,
       });
-
       return { success: true };
+    };
+
+    try {
+      const result = await Promise.race([
+        doLogin(),
+        timeout(LOGIN_TIMEOUT_MS),
+      ]);
+      return result;
     } catch (err) {
-      const errorMessage = handleError(err);
-      return {
-        success: false,
-        error: errorMessage,
-      };
+      const isTimeout = err instanceof Error && err.message === 'LOGIN_TIMEOUT';
+      const errorMessage = isTimeout
+        ? 'Login timed out. Check your connection and try again.'
+        : handleError(err);
+      return { success: false, error: errorMessage };
     } finally {
       setIsLoading(false);
     }
@@ -320,7 +263,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const logout = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     try {
-      if (!supabase) {
+      if (!isSupabaseConfigured()) {
         // Clear state even if supabase is not initialized
         setIsAuthenticated(false);
         setActiveRole(null);
@@ -343,7 +286,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       }
 
       // Sign out from Supabase - this should clear the session from storage
-      const { error } = await supabase.auth.signOut();
+      const { error } = await getSupabase().auth.signOut();
 
       // Clear state immediately after signOut
       setIsAuthenticated(false);
@@ -405,14 +348,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const changeRole = useCallback(async (role: UserRole): Promise<{ success: boolean; error?: string }> => {
     try {
-      if (!supabase) {
+      if (!isSupabaseConfigured()) {
         return {
           success: false,
           error: 'Supabase client not initialized',
         };
       }
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await getSupabase().auth.getUser();
 
       if (!user) {
         throw new AuthenticationError('Not authenticated');
@@ -420,7 +363,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Check if user has permission for this role (you can add permission checking here)
       // For now, we'll just update the role if the user is authenticated
-      const { error } = await supabase!
+      const { error } = await getSupabase()
         .from('user_roles')
         .update({ role: role })
         .eq('user_id', user.id);
@@ -449,14 +392,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    */
   const refreshToken = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     try {
-      if (!supabase) {
+      if (!isSupabaseConfigured()) {
         return {
           success: false,
           error: 'Supabase client not initialized',
         };
       }
 
-      const { data: { session }, error } = await supabase.auth.refreshSession();
+      const { data: { session }, error } = await getSupabase().auth.refreshSession();
 
       if (error) {
         // Refresh failed, logout user

@@ -115,7 +115,9 @@ export const exportToPDF = async (data: ExportData): Promise<void> => {
         margin: { left: 14, right: 14 },
       });
 
-      yPosition = (doc as any).lastAutoTable.finalY + 10;
+      // Get final Y position after table
+      const finalY = (doc as any).lastAutoTable?.finalY || yPosition + 20;
+      yPosition = finalY + 10;
     });
   }
 

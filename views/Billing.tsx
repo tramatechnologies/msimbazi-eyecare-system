@@ -9,6 +9,7 @@ import { generateInvoicePDF, generateReceiptPDF } from '../utils/invoiceUtils';
 import NHIFVerificationBadge from '../components/NHIFVerificationBadge';
 import { getPatientVisit } from '../services/nhifService';
 import { canCreateInvoice } from '../utils/nhifGating';
+import { logCriticalOperation } from '../services/auditLogService';
 
 const Billing: React.FC = () => {
   const { patients, updatePatient, refreshPatient } = usePatients();
@@ -89,10 +90,30 @@ const Billing: React.FC = () => {
       }
     }
 
+    const totalAmount = calculateBillTotal(activePatient.billItems);
+    const patientResponsibility = totalAmount - calculateInsuranceCoverage(activePatient);
+    
+    if (!confirm(`Are you sure you want to process payment for ${activePatient.name}? Total: TZS ${totalAmount.toLocaleString()}, Patient Responsibility: TZS ${patientResponsibility.toLocaleString()}. This will mark the patient as completed.`)) {
+      return;
+    }
+
     setIsProcessing(true);
     try {
       const result = await updatePatient(selectedId, { status: PatientStatus.COMPLETED });
       if (result.success) {
+        // Log payment processing
+        await logCriticalOperation(
+          'PROCESS_PAYMENT',
+          'PATIENT',
+          selectedId,
+          {
+            patientName: activePatient.name,
+            totalAmount: totalAmount,
+            patientResponsibility: patientResponsibility,
+            insuranceType: activePatient.insuranceType,
+          }
+        );
+
         showSuccess(`Payment Processed Successfully for ${activePatient.name}`);
         
         // Generate receipt for cash clients

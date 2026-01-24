@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import Layout from './components/Layout';
 import Registration from './views/Registration';
 import Clinical from './views/Clinical';
@@ -22,7 +22,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer, useToast } from './components/Toast';
 import { UserRole, PatientStatus } from './types';
-import { MOCK_PROVIDERS } from './constants';
+import { getProviders } from './services/providerService';
 
 // Helper function to get background color from Tailwind class
 const getBackgroundColor = (colorClass: string): string => {
@@ -56,6 +56,24 @@ const AppContent: React.FC = () => {
   const { patients } = usePatients();
   const { toasts, removeToast } = useToast();
   const [currentPage, setCurrentPage] = useState<string>('dashboard');
+  const [providers, setProviders] = useState<any[]>([]);
+  const [defaultProvider, setDefaultProvider] = useState<any | null>(null);
+
+  // Load providers on mount
+  useEffect(() => {
+    const loadProviders = async () => {
+      try {
+        const providersList = await getProviders({ role: 'OPTOMETRIST' });
+        setProviders(providersList);
+        if (providersList.length > 0) {
+          setDefaultProvider(providersList[0]);
+        }
+      } catch (error) {
+        console.error('Failed to load providers:', error);
+      }
+    };
+    loadProviders();
+  }, []);
 
   const stats = useMemo(() => ({
     total: patients.length,
@@ -174,7 +192,7 @@ const AppContent: React.FC = () => {
                         backgroundColor: getBackgroundColor(stat.color),
                       }}
                     >
-                      <i className={`fas ${stat.icon} text-xl`}></i>
+                      <i className={`fas ${stat.icon} text-xl text-white`}></i>
                     </div>
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide px-2 py-1 bg-slate-50 rounded-lg">Live</span>
                   </div>
@@ -331,7 +349,7 @@ const AppContent: React.FC = () => {
       case 'queue':
         return <Queue />;
       case 'clinical':
-        return <Clinical activeProvider={MOCK_PROVIDERS[0]} />;
+        return <Clinical activeProvider={defaultProvider || undefined} />;
       case 'pharmacy':
         return <Pharmacy />;
       case 'optical':
